@@ -172,17 +172,27 @@ class CanvasWidget(QWidget):
             painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
             painter.drawText(QRectF(split_x - 14, center_y - 14, 28, 28), Qt.AlignCenter, "◀ ▶")
 
-            # 5. Draw Badges
-            self._draw_badge(painter, "ẢNH GỐC (TRƯỚC)", target_rect.left() + 15, target_rect.top() + 15, "#eab308")
-            self._draw_badge(painter, "ĐÃ LÀM NÉT (SAU)", target_rect.right() - 150, target_rect.top() + 15, "#10b981")
+            # 5. Draw Badges (Adaptive size and position to prevent overlap)
+            avail_w = target_rect.width()
+            badge_y = max(10.0, min(float(self.height() - 35), target_rect.top() + 15.0))
+            if avail_w >= 320:
+                left_x = target_rect.left() + 15.0
+                right_x = max(left_x + 145.0, target_rect.right() - 150.0)
+                self._draw_badge(painter, "ẢNH GỐC (TRƯỚC)", left_x, badge_y, "#eab308", 135)
+                self._draw_badge(painter, "ĐÃ LÀM NÉT (SAU)", right_x, badge_y, "#10b981", 135)
+            elif avail_w >= 160:
+                left_x = target_rect.left() + 10.0
+                right_x = max(left_x + 65.0, target_rect.right() - 70.0)
+                self._draw_badge(painter, "GỐC", left_x, badge_y, "#eab308", 60)
+                self._draw_badge(painter, "NÉT", right_x, badge_y, "#10b981", 60)
 
-    def _draw_badge(self, painter: QPainter, text: str, x: float, y: float, color_hex: str):
+    def _draw_badge(self, painter: QPainter, text: str, x: float, y: float, color_hex: str, badge_w: float = 135):
         """Draw semi-transparent badge indicating image version."""
         painter.save()
-        font = QFont("Segoe UI", 10, QFont.Bold)
+        font_size = 8 if badge_w < 80 else 10
+        font = QFont("Segoe UI", font_size, QFont.Bold)
         painter.setFont(font)
-        badge_w = 135
-        badge_h = 26
+        badge_h = 24 if badge_w < 80 else 26
         badge_rect = QRectF(x, y, badge_w, badge_h)
 
         # Background pill
