@@ -36,6 +36,7 @@ $RECYCLE.BIN/
 
 # Temporary test / scratch files
 scratch/
+test_docs/
 test_*.png
 test_*.jpg
 output_*.pdf
