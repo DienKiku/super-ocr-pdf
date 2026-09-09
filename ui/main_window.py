@@ -325,7 +325,6 @@ class MainWindow(QMainWindow):
                 denoise=params.denoise,
                 upscale_factor=params.upscale_factor,
                 color_mode=params.color_mode,
-                auto_deskew=params.auto_deskew,
                 auto_flatten=params.auto_flatten,
                 rotation=rot
             )

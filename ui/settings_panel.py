@@ -163,15 +163,6 @@ class SettingsPanel(QWidget):
         self.chk_auto_flatten.stateChanged.connect(self._on_slider_moved)
         gl_layout.addWidget(self.chk_auto_flatten)
 
-        # Auto Deskew Checkbox
-        self.chk_deskew = QCheckBox("📐 Tự động nắn thẳng & chống nghiêng (Auto-Deskew)")
-        self.chk_deskew.setToolTip(
-            "Tự động phát hiện hướng nghiêng của văn bản & bảng biểu để xoay thẳng chuẩn xác.\n"
-            "Tích hợp bộ lọc thông minh (deadband) giúp giữ nguyên độ nét gốc nếu tài liệu đã thẳng."
-        )
-        self.chk_deskew.stateChanged.connect(self._on_slider_moved)
-        gl_layout.addWidget(self.chk_deskew)
-
         layout.addWidget(group_clean)
 
         # Action Buttons: Apply
@@ -218,7 +209,6 @@ class SettingsPanel(QWidget):
         self._current_params.upscale_factor = float(self.combo_upscale.currentData())
         self._current_params.color_mode = str(self.combo_color.currentData())
         self._current_params.auto_flatten = self.chk_auto_flatten.isChecked()
-        self._current_params.auto_deskew = self.chk_deskew.isChecked()
 
         self.params_changed.emit(self._current_params)
 
@@ -253,7 +243,6 @@ class SettingsPanel(QWidget):
                 break
 
         self.chk_auto_flatten.setChecked(params.auto_flatten)
-        self.chk_deskew.setChecked(params.auto_deskew)
 
         self._is_updating_ui = False
         if emit_signal:

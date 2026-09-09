@@ -50,6 +50,166 @@ class DocumentFlattener:
         return pts_ordered
 
     @classmethod
+    def is_valid_quad(
+        cls, quad: Optional[np.ndarray], w: int, h: int, content_angle: Optional[float] = None
+    ) -> bool:
+        """
+        Validates whether a 4-point quadrilateral represents a real perspective document page:
+        1. Opposite edges must be roughly parallel (top vs bot <= 10 deg, left vs right <= 14 deg).
+        2. Quad must not touch all 4 outer canvas boundaries (which indicates the entire image frame).
+        3. Aspect ratio must be physically valid for documents (between 0.25 and 4.0).
+        4. If text content angle is detected, top/bottom edges should be roughly consistent.
+        """
+        if quad is None or len(quad) != 4:
+            return False
+
+        tl, tr, br, bl = quad
+        top_vec = tr - tl
+        bot_vec = br - bl
+        left_vec = bl - tl
+        right_vec = br - tr
+
+        ang_top = np.degrees(np.arctan2(top_vec[1], top_vec[0]))
+        ang_bot = np.degrees(np.arctan2(bot_vec[1], bot_vec[0]))
+        ang_left = np.degrees(np.arctan2(left_vec[1], left_vec[0]))
+        ang_right = np.degrees(np.arctan2(right_vec[1], right_vec[0]))
+
+        diff_tb = abs(ang_top - ang_bot)
+        while diff_tb > 180:
+            diff_tb = abs(diff_tb - 360)
+        diff_lr = abs(ang_left - ang_right)
+        while diff_lr > 180:
+            diff_lr = abs(diff_lr - 360)
+
+        # Opposite edges must be roughly parallel
+        if diff_tb > 10.0 or diff_lr > 14.0:
+            return False
+
+        # If content angle is available, top/bot edges must be roughly aligned with text
+        if content_angle is not None and abs(content_angle) > 0.5:
+            d_top_content = abs(ang_top - content_angle)
+            while d_top_content > 180:
+                d_top_content = abs(d_top_content - 360)
+            if d_top_content > 12.0:
+                return False
+
+        # Reject if quad touches all 4 outer borders of the camera frame
+        xs, ys = quad[:, 0], quad[:, 1]
+        if xs.min() <= 8 and ys.min() <= 8 and xs.max() >= (w - 10) and ys.max() >= (h - 10):
+            return False
+
+        # Aspect ratio check
+        avg_w = (np.linalg.norm(top_vec) + np.linalg.norm(bot_vec)) / 2.0
+        avg_h = (np.linalg.norm(left_vec) + np.linalg.norm(right_vec)) / 2.0
+        if avg_w < 100 or avg_h < 100:
+            return False
+        if not (0.25 <= (avg_w / avg_h) <= 4.0):
+            return False
+
+        return True
+
+    @classmethod
+    def detect_content_angle(cls, gray: np.ndarray) -> float:
+        """Fast detection of document text/printed line orientation angle (in degrees)."""
+        h, w = gray.shape
+        scale = 600.0 / w
+        small = cv2.resize(gray, (600, int(h * scale)))
+        edges = cv2.Canny(small, 50, 150)
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=70, minLineLength=50, maxLineGap=10)
+        if lines is None or len(lines) == 0:
+            return 0.0
+        angles = []
+        for x1, y1, x2, y2 in lines.reshape(-1, 4):
+            ang = np.degrees(np.arctan2(y2 - y1, x2 - x1))
+            while ang > 45:
+                ang -= 90
+            while ang < -45:
+                ang += 90
+            if abs(ang) < 35:
+                angles.append(ang)
+        if len(angles) >= 5:
+            return float(np.median(angles))
+        return 0.0
+
+    @classmethod
+    def find_content_quad(cls, img: np.ndarray, content_angle: float = 0.0) -> Optional[np.ndarray]:
+        """
+        Fallback for tilted documents or cluttered backgrounds:
+        Detects the printed document content (text lines, tables, titles) using local background
+        subtraction, computes its oriented bounding box, and safely expands to cover paper margins.
+        """
+        h, w = img.shape[:2]
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+        bg = cv2.medianBlur(gray, 25)
+        diff = cv2.subtract(bg, gray)
+        _, text_mask = cv2.threshold(diff, 20, 255, cv2.THRESH_BINARY)
+
+        # Exclude outer image boundaries
+        text_mask[:35, :] = 0
+        text_mask[-35:, :] = 0
+        text_mask[:, :35] = 0
+        text_mask[:, -35:] = 0
+
+        k = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5))
+        closed = cv2.morphologyEx(text_mask, cv2.MORPH_CLOSE, k)
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(closed)
+
+        pts = []
+        for i in range(1, num_labels):
+            area = stats[i, cv2.CC_STAT_AREA]
+            if area > 120:
+                x, y, bw, bh = stats[i, :4]
+                if y < 140 and area < 500:
+                    continue
+                pts.extend([[x, y], [x + bw, y], [x + bw, y + bh], [x, y + bh]])
+
+        if len(pts) < 8:
+            return None
+
+        pts = np.array(pts, dtype=np.float32)
+        rect = cv2.minAreaRect(pts)
+        (cx, cy), (rw, rh), ang = rect
+
+        # Angle-aware dimension expansion
+        if abs(ang) > 45:
+            dim_x, dim_y = rh, rw
+            new_dim_x = min(float(w - 4), dim_x * 1.05)
+            new_dim_y = min(float(h - 4), dim_y * 1.05)
+            exp_rect = ((cx, cy), (new_dim_y, new_dim_x), ang)
+        else:
+            dim_x, dim_y = rw, rh
+            new_dim_x = min(float(w - 4), dim_x * 1.05)
+            new_dim_y = min(float(h - 4), dim_y * 1.05)
+            exp_rect = ((cx, cy), (new_dim_x, new_dim_y), ang)
+
+        box = cv2.boxPoints(exp_rect)
+        box[:, 0] = np.clip(box[:, 0], 0, w - 1)
+        box[:, 1] = np.clip(box[:, 1], 0, h - 1)
+        return cls.order_points(box)
+
+    @classmethod
+    def is_already_full_page(cls, img: np.ndarray) -> bool:
+        """Checks if the image is already a clean full-frame document (no external table/floor background)."""
+        h, w = img.shape[:2]
+        cw = max(5, int(w * 0.04))
+        ch = max(5, int(h * 0.04))
+        corners = [
+            img[:ch, :cw],
+            img[:ch, -cw:],
+            img[-ch:, -cw:],
+            img[-ch:, :cw]
+        ]
+        for c in corners:
+            if len(c.shape) == 3:
+                hsv = cv2.cvtColor(c, cv2.COLOR_BGR2HSV)
+                if hsv[:, :, 1].mean() > 50 or hsv[:, :, 2].mean() < 120:
+                    return False
+            else:
+                if c.mean() < 120:
+                    return False
+        return True
+
+    @classmethod
     def find_document_corners(cls, img: np.ndarray) -> Optional[np.ndarray]:
         """
         Detects the 4 corners of a document sheet on a contrasting or textured surface.
@@ -59,13 +219,19 @@ class DocumentFlattener:
         if img is None or img.size == 0:
             return None
 
-        h, w = img.shape[:2]
-        img_area = h * w
-        pad = 20
+        # If already a clean full-page document without external background, preserve as is
+        if cls.is_already_full_page(img):
+            return None
 
-        # Add black border padding to prevent paper edges touching frame borders from being clipped
+        h, w = img.shape[:2]
+        img_area = float(h * w)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+        content_ang = cls.detect_content_angle(gray)
+
+        pad = 20
+        # Add border padding to prevent paper edges touching frame borders from being clipped
         padded = cv2.copyMakeBorder(
-            img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[0, 0, 0] if len(img.shape) == 3 else 0
+            img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[128, 128, 128] if len(img.shape) == 3 else 128
         )
         ph, pw = padded.shape[:2]
 
@@ -82,11 +248,11 @@ class DocumentFlattener:
         small_area = sh * sw
 
         smooth = cv2.bilateralFilter(small, 9, 75, 75)
-        gray = cv2.cvtColor(smooth, cv2.COLOR_BGR2GRAY) if len(smooth.shape) == 3 else smooth
+        p_gray = cv2.cvtColor(smooth, cv2.COLOR_BGR2GRAY) if len(smooth.shape) == 3 else smooth
         hsv = cv2.cvtColor(smooth, cv2.COLOR_BGR2HSV) if len(smooth.shape) == 3 else None
 
         masks = []
-        k_close = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+        k_close = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
 
         # Strategy 1: Saturation mask for white/cream paper on colored backgrounds (chairs, desks, wood)
         if hsv is not None:
@@ -98,82 +264,47 @@ class DocumentFlattener:
             masks.append(('sat_otsu', cv2.morphologyEx(sat_paper, cv2.MORPH_CLOSE, k_close, borderType=cv2.BORDER_CONSTANT, borderValue=0)))
 
         # Strategy 2: Grayscale Otsu thresholding
-        _, thresh_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        _, thresh_otsu = cv2.threshold(p_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         masks.append(('gray_otsu', cv2.morphologyEx(thresh_otsu, cv2.MORPH_CLOSE, k_close, borderType=cv2.BORDER_CONSTANT, borderValue=0)))
 
         # Strategy 3: Adaptive thresholding on lightness
         thresh_adapt = cv2.adaptiveThreshold(
-            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 25, 6
+            p_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 25, 6
         )
         masks.append(('adapt', cv2.morphologyEx(thresh_adapt, cv2.MORPH_CLOSE, k_close, borderType=cv2.BORDER_CONSTANT, borderValue=0)))
 
-        # Strategy 4: Inverted Otsu if document is darker than background
-        _, thresh_inv = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        masks.append(('inv_otsu', cv2.morphologyEx(thresh_inv, cv2.MORPH_CLOSE, k_close, borderType=cv2.BORDER_CONSTANT, borderValue=0)))
-
-        candidates = []
+        valid_candidates = []
 
         for name, mask in masks:
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             for cnt in contours:
                 area = cv2.contourArea(cnt)
                 frac = area / small_area
-                # Skip if too small or too large
                 if frac < 0.10 or frac > 0.99:
                     continue
 
                 peri = cv2.arcLength(cnt, True)
-                found_approx = False
-
-                # Try multi-epsilon polygon approximation
-                for eps in [0.015, 0.02, 0.03, 0.04, 0.05]:
+                for eps in [0.015, 0.02, 0.025, 0.03, 0.04, 0.05]:
                     approx = cv2.approxPolyDP(cnt, eps * peri, True)
                     if len(approx) == 4 and cv2.isContourConvex(approx):
                         pts = approx.reshape(4, 2) / scale - pad
                         pts[:, 0] = np.clip(pts[:, 0], 0, w - 1)
                         pts[:, 1] = np.clip(pts[:, 1], 0, h - 1)
-
                         ordered = cls.order_points(pts)
-                        if ordered is not None:
-                            top_w = np.linalg.norm(ordered[1] - ordered[0])
-                            bot_w = np.linalg.norm(ordered[2] - ordered[3])
-                            left_h = np.linalg.norm(ordered[3] - ordered[0])
-                            right_h = np.linalg.norm(ordered[2] - ordered[1])
-                            avg_w = (top_w + bot_w) / 2.0
-                            avg_h = (left_h + right_h) / 2.0
-                            if avg_w > 0 and avg_h > 0 and 0.25 <= (avg_w / avg_h) <= 4.0:
-                                p_ratio = cv2.contourArea(ordered) / img_area
-                                if 0.10 <= p_ratio <= 0.99:
-                                    candidates.append((area * 2.0, ordered))
-                                    found_approx = True
-                                    break
+                        if cls.is_valid_quad(ordered, w, h, content_ang):
+                            valid_candidates.append((area * 2.0, ordered))
+                            break
 
-                if not found_approx:
-                    # Fallback to minAreaRect bounding box
-                    rect = cv2.minAreaRect(cnt)
-                    box = cv2.boxPoints(rect) / scale - pad
-                    box[:, 0] = np.clip(box[:, 0], 0, w - 1)
-                    box[:, 1] = np.clip(box[:, 1], 0, h - 1)
-                    ordered_box = cls.order_points(box)
-                    if ordered_box is not None:
-                        top_w = np.linalg.norm(ordered_box[1] - ordered_box[0])
-                        bot_w = np.linalg.norm(ordered_box[2] - ordered_box[3])
-                        left_h = np.linalg.norm(ordered_box[3] - ordered_box[0])
-                        right_h = np.linalg.norm(ordered_box[2] - ordered_box[1])
-                        avg_w = (top_w + bot_w) / 2.0
-                        avg_h = (left_h + right_h) / 2.0
-                        if avg_w > 0 and avg_h > 0 and 0.25 <= (avg_w / avg_h) <= 4.0:
-                            p_ratio = cv2.contourArea(ordered_box) / img_area
-                            if 0.10 <= p_ratio <= 0.99:
-                                candidates.append((area * 1.0, ordered_box))
+        if valid_candidates:
+            valid_candidates.sort(key=lambda c: c[0], reverse=True)
+            return valid_candidates[0][1]
 
-        if not candidates:
-            return None
+        # If pure boundary contours failed (e.g. tilted document with background clutter), fallback to content quad!
+        c_quad = cls.find_content_quad(img, content_ang)
+        if c_quad is not None and cls.is_valid_quad(c_quad, w, h):
+            return c_quad
 
-        # Sort by candidate score (area * confidence)
-        candidates.sort(key=lambda c: c[0], reverse=True)
-        best_quad = candidates[0][1]
-        return best_quad
+        return None
 
     @classmethod
     def crop_and_flatten(
