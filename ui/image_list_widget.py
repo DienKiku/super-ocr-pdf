@@ -204,16 +204,20 @@ class ImageListWidget(QWidget):
                 self.list_widget.setCurrentRow(0)
             self.pages_changed.emit()
 
-    def _rebuild_list_ui(self):
+    def _rebuild_list_ui(self, selected_row: Optional[int] = None):
         """Refreshes list widget thumbnails and titles."""
+        # Update page count label
+        self.count_label.setText(f"({len(self.items)} trang)")
+
         self.list_widget.blockSignals(True)
-        curr_row = self.list_widget.currentRow()
+        curr_row = selected_row if selected_row is not None else self.list_widget.currentRow()
         self.list_widget.clear()
 
         for idx, it in enumerate(self.items):
             thumb_pixmap = self._generate_thumbnail(it.original_image, it.rotation, idx + 1)
             list_item = QListWidgetItem(QIcon(thumb_pixmap), f"Trang {idx + 1}\n{it.filename}")
             list_item.setSizeHint(QSize(180, 95))
+            list_item.setData(Qt.UserRole, idx)  # Store original index for drag-drop sync
             self.list_widget.addItem(list_item)
 
         target_row = -1
@@ -255,9 +259,22 @@ class ImageListWidget(QWidget):
             self.page_selected.emit(row)
 
     def _on_rows_reordered(self, parent, start, end, destination, row):
-        # Synchronize self.items order with list_widget order
-        # When dragged, list_widget already rearranged items visually
-        pass
+        """Synchronize self.items order with list_widget order after drag-drop."""
+        # After drag-drop, QListWidget has rearranged visually but self.items is stale.
+        # Read the new order from the stored original indices in each list item's data.
+        new_items = []
+        for i in range(self.list_widget.count()):
+            list_item = self.list_widget.item(i)
+            orig_idx = list_item.data(Qt.UserRole)
+            if orig_idx is not None and 0 <= orig_idx < len(self.items):
+                new_items.append(self.items[orig_idx])
+
+        if len(new_items) == len(self.items):
+            self.items = new_items
+
+        # Rebuild UI to fix numbering (Trang 1, Trang 2, ...) after reorder
+        self._rebuild_list_ui()
+        self.pages_changed.emit()
 
     def get_current_item(self) -> Optional[ImageItem]:
         row = self.list_widget.currentRow()
@@ -284,28 +301,23 @@ class ImageListWidget(QWidget):
         row = self.list_widget.currentRow()
         if row > 0:
             self.items[row - 1], self.items[row] = self.items[row], self.items[row - 1]
-            self._rebuild_list_ui()
-            self.list_widget.setCurrentRow(row - 1)
+            self._rebuild_list_ui(selected_row=row - 1)
             self.pages_changed.emit()
 
     def move_current_down(self):
         row = self.list_widget.currentRow()
         if 0 <= row < len(self.items) - 1:
             self.items[row + 1], self.items[row] = self.items[row], self.items[row + 1]
-            self._rebuild_list_ui()
-            self.list_widget.setCurrentRow(row + 1)
+            self._rebuild_list_ui(selected_row=row + 1)
             self.pages_changed.emit()
 
     def delete_current(self):
         row = self.list_widget.currentRow()
         if 0 <= row < len(self.items):
             del self.items[row]
-            self._rebuild_list_ui()
-            if self.items:
-                new_row = min(row, len(self.items) - 1)
-                self.list_widget.setCurrentRow(new_row)
-                self.page_selected.emit(new_row)
-            else:
+            new_row = min(row, len(self.items) - 1) if self.items else -1
+            self._rebuild_list_ui(selected_row=new_row)
+            if not self.items:
                 self.page_selected.emit(-1)
             self.pages_changed.emit()
 

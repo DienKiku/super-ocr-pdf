@@ -1,13 +1,14 @@
 """
 Smart Document Boundary Detection, Perspective Correction & Auto-Crop Module.
+Pipeline: Canny Edge Detection → Contour & Missing-Corner Reconstruction → Hough Lines Fallback → Homography → Perspective Warp.
 Emulates professional document scanners (CamScanner, Adobe Scan, Microsoft Lens):
 - Automatically detects document boundaries on desks, floors, beds, and tables.
+- Reconstructs missing/cut-off corners from the intersection of adjacent edges.
 - Cuts off excess background, shadows, and objects outside the document.
 - Warps perspective to produce a flat, rectangular, scan-quality document page.
 """
 
 from typing import Optional, Tuple
-from itertools import combinations
 import cv2
 import numpy as np
 
@@ -16,10 +17,32 @@ class DocumentFlattener:
     """Intelligent document edge detection and perspective rectification."""
 
     @staticmethod
+    def line_from_points(p1, p2) -> Tuple[float, float, float]:
+        """Line equation ax + by + c = 0 from two points."""
+        x1, y1 = float(p1[0]), float(p1[1])
+        x2, y2 = float(p2[0]), float(p2[1])
+        a = y2 - y1
+        b = x1 - x2
+        c = x2 * y1 - x1 * y2
+        return a, b, c
+
+    @staticmethod
+    def line_intersection(l1: Tuple[float, float, float], l2: Tuple[float, float, float]) -> Optional[np.ndarray]:
+        """Computes intersection (x, y) of two lines a1*x + b1*y + c1 = 0 and a2*x + b2*y + c2 = 0."""
+        a1, b1, c1 = l1
+        a2, b2, c2 = l2
+        det = a1 * b2 - a2 * b1
+        if abs(det) < 1e-6:
+            return None
+        x = (b1 * c2 - b2 * c1) / det
+        y = (a2 * c1 - a1 * c2) / det
+        return np.array([x, y], dtype=np.float32)
+
+    @staticmethod
     def order_points(pts: np.ndarray) -> Optional[np.ndarray]:
         """
         Order 4 corner points: [top-left, top-right, bottom-right, bottom-left].
-        Uses centroid angle sorting to guarantee all 4 vertices are unique and sequential.
+        Uses sum/diff method for robust ordering regardless of rotation.
         """
         pts = np.array(pts, dtype=np.float32)
         if len(pts) != 4:
@@ -28,199 +51,33 @@ class DocumentFlattener:
         # Guarantee 4 distinct vertices (no collapsed/coincident points)
         for i in range(4):
             for j in range(i + 1, 4):
-                if np.linalg.norm(pts[i] - pts[j]) < 20:
+                if np.linalg.norm(pts[i] - pts[j]) < 15:
                     return None
 
-        center = np.mean(pts, axis=0)
-        diff = pts - center
-        angles = np.arctan2(diff[:, 1], diff[:, 0])
-        pts_sorted = pts[np.argsort(angles)]
+        ordered = np.zeros((4, 2), dtype=np.float32)
+        s = pts.sum(axis=1)                    # x + y
+        diff = np.diff(pts, axis=1).flatten()  # y - x
 
-        # Top-left is closest to origin (min x + y)
-        s = pts_sorted[:, 0] + pts_sorted[:, 1]
-        tl_idx = np.argmin(s)
-        pts_ordered = np.roll(pts_sorted, -tl_idx, axis=0)
+        ordered[0] = pts[np.argmin(s)]         # top-left: smallest sum
+        ordered[2] = pts[np.argmax(s)]         # bottom-right: largest sum
+        ordered[1] = pts[np.argmin(diff)]      # top-right: smallest diff (largest x - y)
+        ordered[3] = pts[np.argmax(diff)]      # bottom-left: largest diff (smallest x - y)
 
-        # Ensure clockwise ordering: cross product of (P1 - P0) and (P3 - P0)
-        v1 = pts_ordered[1] - pts_ordered[0]
-        v2 = pts_ordered[3] - pts_ordered[0]
-        cross = v1[0] * v2[1] - v1[1] * v2[0]
-        if cross < 0:
-            pts_ordered = np.array([pts_ordered[0], pts_ordered[3], pts_ordered[2], pts_ordered[1]])
-
-        return pts_ordered
-
-    @classmethod
-    def is_valid_quad(
-        cls, quad: Optional[np.ndarray], w: int, h: int, content_angle: Optional[float] = None
-    ) -> bool:
-        """
-        Validates whether a 4-point quadrilateral represents a real perspective document page:
-        1. Opposite edges must be roughly parallel (top vs bot <= 10 deg, left vs right <= 14 deg).
-        2. Quad must not touch all 4 outer canvas boundaries (which indicates the entire image frame).
-        3. Aspect ratio must be physically valid for documents (between 0.25 and 4.0).
-        4. If text content angle is detected, top/bottom edges should be roughly consistent.
-        """
-        if quad is None or len(quad) != 4:
-            return False
-
-        tl, tr, br, bl = quad
-        top_vec = tr - tl
-        bot_vec = br - bl
-        left_vec = bl - tl
-        right_vec = br - tr
-
-        ang_top = np.degrees(np.arctan2(top_vec[1], top_vec[0]))
-        ang_bot = np.degrees(np.arctan2(bot_vec[1], bot_vec[0]))
-        ang_left = np.degrees(np.arctan2(left_vec[1], left_vec[0]))
-        ang_right = np.degrees(np.arctan2(right_vec[1], right_vec[0]))
-
-        diff_tb = abs(ang_top - ang_bot)
-        while diff_tb > 180:
-            diff_tb = abs(diff_tb - 360)
-        diff_lr = abs(ang_left - ang_right)
-        while diff_lr > 180:
-            diff_lr = abs(diff_lr - 360)
-
-        # Opposite edges must be roughly parallel
-        if diff_tb > 10.0 or diff_lr > 14.0:
-            return False
-
-        # If content angle is available, top/bot edges must be roughly aligned with text
-        if content_angle is not None and abs(content_angle) > 0.5:
-            d_top_content = abs(ang_top - content_angle)
-            while d_top_content > 180:
-                d_top_content = abs(d_top_content - 360)
-            if d_top_content > 12.0:
-                return False
-
-        # Reject if quad touches all 4 outer borders of the camera frame
-        xs, ys = quad[:, 0], quad[:, 1]
-        if xs.min() <= 8 and ys.min() <= 8 and xs.max() >= (w - 10) and ys.max() >= (h - 10):
-            return False
-
-        # Aspect ratio check
-        avg_w = (np.linalg.norm(top_vec) + np.linalg.norm(bot_vec)) / 2.0
-        avg_h = (np.linalg.norm(left_vec) + np.linalg.norm(right_vec)) / 2.0
-        if avg_w < 100 or avg_h < 100:
-            return False
-        if not (0.25 <= (avg_w / avg_h) <= 4.0):
-            return False
-
-        return True
-
-    @classmethod
-    def detect_content_angle(cls, gray: np.ndarray) -> float:
-        """Fast detection of document text/printed line orientation angle (in degrees)."""
-        h, w = gray.shape
-        scale = 600.0 / w
-        small = cv2.resize(gray, (600, int(h * scale)))
-        edges = cv2.Canny(small, 50, 150)
-        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=70, minLineLength=50, maxLineGap=10)
-        if lines is None or len(lines) == 0:
-            return 0.0
-        angles = []
-        for x1, y1, x2, y2 in lines.reshape(-1, 4):
-            ang = np.degrees(np.arctan2(y2 - y1, x2 - x1))
-            while ang > 45:
-                ang -= 90
-            while ang < -45:
-                ang += 90
-            if abs(ang) < 35:
-                angles.append(ang)
-        if len(angles) >= 5:
-            return float(np.median(angles))
-        return 0.0
-
-    @classmethod
-    def find_content_quad(cls, img: np.ndarray, content_angle: float = 0.0) -> Optional[np.ndarray]:
-        """
-        Fallback for tilted documents or cluttered backgrounds:
-        Detects the printed document content (text lines, tables, titles) using local background
-        subtraction, computes its oriented bounding box, and safely expands to cover paper margins.
-        """
-        h, w = img.shape[:2]
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
-        bg = cv2.medianBlur(gray, 25)
-        diff = cv2.subtract(bg, gray)
-        _, text_mask = cv2.threshold(diff, 20, 255, cv2.THRESH_BINARY)
-
-        # Exclude outer image boundaries
-        text_mask[:35, :] = 0
-        text_mask[-35:, :] = 0
-        text_mask[:, :35] = 0
-        text_mask[:, -35:] = 0
-
-        k = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5))
-        closed = cv2.morphologyEx(text_mask, cv2.MORPH_CLOSE, k)
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(closed)
-
-        pts = []
-        for i in range(1, num_labels):
-            area = stats[i, cv2.CC_STAT_AREA]
-            if area > 120:
-                x, y, bw, bh = stats[i, :4]
-                if y < 140 and area < 500:
-                    continue
-                pts.extend([[x, y], [x + bw, y], [x + bw, y + bh], [x, y + bh]])
-
-        if len(pts) < 8:
+        # Validate: ordered points must form a valid convex polygon with positive area
+        area = 0.5 * abs(
+            (ordered[1][0] - ordered[0][0]) * (ordered[2][1] - ordered[0][1])
+            - (ordered[2][0] - ordered[0][0]) * (ordered[1][1] - ordered[0][1])
+            + (ordered[2][0] - ordered[0][0]) * (ordered[3][1] - ordered[0][1])
+            - (ordered[3][0] - ordered[0][0]) * (ordered[2][1] - ordered[0][1])
+        )
+        if area < 100:
             return None
 
-        pts = np.array(pts, dtype=np.float32)
-        center = np.mean(pts, axis=0)
-
-        use_ang = content_angle if abs(content_angle) > 0.4 else 0.0
-        if use_ang != 0.0:
-            rad = -np.radians(use_ang)
-            cos_a, sin_a = np.cos(rad), np.sin(rad)
-            R = np.array([[cos_a, -sin_a], [sin_a, cos_a]])
-            rotated_pts = np.dot(pts - center, R.T)
-
-            min_u, min_v = np.min(rotated_pts, axis=0)
-            max_u, max_v = np.max(rotated_pts, axis=0)
-
-            pad_u = max(20.0, (max_u - min_u) * 0.04)
-            pad_v = max(20.0, (max_v - min_v) * 0.03)
-
-            corners_rot = np.array([
-                [min_u - pad_u, min_v - pad_v],
-                [max_u + pad_u, min_v - pad_v],
-                [max_u + pad_u, max_v + pad_v],
-                [min_u - pad_u, max_v + pad_v]
-            ], dtype=np.float32)
-
-            rad_b = np.radians(use_ang)
-            cos_b, sin_b = np.cos(rad_b), np.sin(rad_b)
-            R_b = np.array([[cos_b, -sin_b], [sin_b, cos_b]])
-            quad = np.dot(corners_rot, R_b.T) + center
-            quad[:, 0] = np.clip(quad[:, 0], 0, w - 1)
-            quad[:, 1] = np.clip(quad[:, 1], 0, h - 1)
-            return cls.order_points(quad)
-        else:
-            rect = cv2.minAreaRect(pts)
-            (cx, cy), (rw, rh), ang = rect
-
-            # Angle-aware dimension expansion
-            if abs(ang) > 45:
-                dim_x, dim_y = rh, rw
-                new_dim_x = min(float(w - 4), dim_x * 1.05)
-                new_dim_y = min(float(h - 4), dim_y * 1.05)
-                exp_rect = ((cx, cy), (new_dim_y, new_dim_x), ang)
-            else:
-                dim_x, dim_y = rw, rh
-                new_dim_x = min(float(w - 4), dim_x * 1.05)
-                new_dim_y = min(float(h - 4), dim_y * 1.05)
-                exp_rect = ((cx, cy), (new_dim_x, new_dim_y), ang)
-
-            box = cv2.boxPoints(exp_rect)
-            box[:, 0] = np.clip(box[:, 0], 0, w - 1)
-            box[:, 1] = np.clip(box[:, 1], 0, h - 1)
-            return cls.order_points(box)
+        return ordered
 
     @classmethod
     def is_already_full_page(cls, img: np.ndarray) -> bool:
-        """Checks if the image is already a clean full-frame document (no external table/floor background)."""
+        """Checks if the image is already a clean full-frame document (no external background)."""
         h, w = img.shape[:2]
         cw = max(5, int(w * 0.04))
         ch = max(5, int(h * 0.04))
@@ -241,135 +98,259 @@ class DocumentFlattener:
         return True
 
     @classmethod
+    def is_valid_document_quad(cls, quad: Optional[np.ndarray], w: int, h: int) -> bool:
+        """
+        Validates whether a 4-point quadrilateral represents a real perspective document page:
+        1. Must span a substantial portion of image width and height (> 35%).
+        2. Aspect ratio must be physically valid for documents (between 0.35 and 2.8).
+        3. Opposite edges must be roughly parallel (top vs bot <= 14 deg, left vs right <= 14 deg).
+        4. Area must be > 20% of image area.
+        """
+        if quad is None or len(quad) != 4:
+            return False
+        tl, tr, br, bl = quad
+
+        top = tr - tl
+        bot = br - bl
+        left = bl - tl
+        right = br - tr
+
+        w_top = np.linalg.norm(top)
+        w_bot = np.linalg.norm(bot)
+        h_left = np.linalg.norm(left)
+        h_right = np.linalg.norm(right)
+
+        avg_w = (w_top + w_bot) / 2.0
+        avg_h = (h_left + h_right) / 2.0
+
+        if avg_w < w * 0.35 or avg_h < h * 0.35:
+            return False
+
+        ratio = avg_w / avg_h
+        if not (0.35 <= ratio <= 2.8):
+            return False
+
+        ang_top = np.degrees(np.arctan2(top[1], top[0]))
+        ang_bot = np.degrees(np.arctan2(bot[1], bot[0]))
+        diff_tb = abs(ang_top - ang_bot)
+        while diff_tb > 180:
+            diff_tb = abs(diff_tb - 360)
+
+        ang_left = np.degrees(np.arctan2(left[1], left[0]))
+        ang_right = np.degrees(np.arctan2(right[1], right[0]))
+        diff_lr = abs(ang_left - ang_right)
+        while diff_lr > 180:
+            diff_lr = abs(diff_lr - 360)
+
+        if diff_tb > 14.0 or diff_lr > 14.0:
+            return False
+
+        area = cv2.contourArea(quad)
+        if area < (w * h * 0.20):
+            return False
+
+        return True
+
+    @classmethod
+    def _detect_corners_contour(cls, img: np.ndarray) -> Optional[np.ndarray]:
+        """
+        Step 1 & 2: Canny Edge Detection + Contour filtering to find 4 corners.
+        If a corner is clipped / missing (5-point polygon), estimates the missing
+        corner from the intersection of adjacent edge lines.
+        """
+        h, w = img.shape[:2]
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+        blurred = cv2.bilateralFilter(gray, 9, 75, 75)
+        canny = cv2.Canny(blurred, 30, 100)
+
+        k = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        dilated = cv2.dilate(canny, k, iterations=2)
+
+        cnts, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not cnts:
+            return None
+        cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
+
+        # Check for 4-point convex hull first
+        for c in cnts[:5]:
+            hull = cv2.convexHull(c)
+            peri = cv2.arcLength(hull, True)
+            for eps in np.linspace(0.02, 0.045, 12):
+                approx = cv2.approxPolyDP(hull, eps * peri, True)
+                if len(approx) == 4 and cv2.isContourConvex(approx):
+                    quad = approx.reshape(4, 2).astype(np.float32)
+                    ordered = cls.order_points(quad)
+                    if cls.is_valid_document_quad(ordered, w, h):
+                        return ordered
+
+        # Check for 5-point convex hull (one corner cut into a chamfer)
+        for c in cnts[:5]:
+            hull = cv2.convexHull(c)
+            peri = cv2.arcLength(hull, True)
+            for eps in np.linspace(0.015, 0.035, 10):
+                approx = cv2.approxPolyDP(hull, eps * peri, True)
+                if len(approx) == 5 and cv2.isContourConvex(approx):
+                    pts = approx.reshape(5, 2).astype(np.float32)
+                    lengths = [np.hypot(pts[(i + 1) % 5, 0] - pts[i, 0], pts[(i + 1) % 5, 1] - pts[i, 1]) for i in range(5)]
+                    min_idx = np.argmin(lengths)
+
+                    p_prev = pts[(min_idx - 1) % 5]
+                    p_c1 = pts[min_idx]
+                    p_c2 = pts[(min_idx + 1) % 5]
+                    p_next = pts[(min_idx + 2) % 5]
+
+                    l1 = cls.line_from_points(p_prev, p_c1)
+                    l2 = cls.line_from_points(p_c2, p_next)
+                    est_corner = cls.line_intersection(l1, l2)
+                    if est_corner is not None:
+                        reconstructed = []
+                        for i in range(5):
+                            if i == min_idx:
+                                reconstructed.append(est_corner)
+                            elif i == (min_idx + 1) % 5:
+                                continue
+                            else:
+                                reconstructed.append(pts[i])
+                        reconstructed = np.array(reconstructed, dtype=np.float32)
+                        ordered = cls.order_points(reconstructed)
+                        if cls.is_valid_document_quad(ordered, w, h):
+                            return ordered
+
+        return None
+
+    @classmethod
+    def _detect_corners_lines(cls, img: np.ndarray) -> Optional[np.ndarray]:
+        """
+        Fallback Method: Line Intersection.
+        Detects document edge lines using Hough transform, filters lines matching text orientation,
+        identifies Top, Bottom, Left, Right boundaries, and computes pairwise intersections.
+        """
+        h, w = img.shape[:2]
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+        blurred = cv2.bilateralFilter(gray, 9, 75, 75)
+        canny = cv2.Canny(blurred, 30, 100)
+
+        lines = cv2.HoughLinesP(
+            canny, 1, np.pi / 180,
+            threshold=45,
+            minLineLength=int(min(w, h) * 0.10),
+            maxLineGap=20
+        )
+        if lines is None:
+            return None
+        lines = lines.reshape(-1, 4)
+
+        # Detect text orientation angle from Hough lines
+        angles = []
+        for x1, y1, x2, y2 in lines:
+            a = np.degrees(np.arctan2(y2 - y1, x2 - x1))
+            while a > 45: a -= 90
+            while a < -45: a += 90
+            if abs(a) < 25:
+                angles.append(a)
+        median_angle = float(np.median(angles)) if angles else 0.0
+
+        # Filter horizontal lines matching text tilt
+        horiz = []
+        for x1, y1, x2, y2 in lines:
+            a = np.degrees(np.arctan2(y2 - y1, x2 - x1))
+            while a > 90: a -= 180
+            while a < -90: a += 180
+            if abs(a - median_angle) < 6.0:
+                l = np.hypot(x2 - x1, y2 - y1)
+                y_mid = (y1 + y2) / 2.0
+                horiz.append((x1, y1, x2, y2, l, y_mid, a))
+
+        # Filter vertical lines roughly perpendicular (80-100 deg)
+        vert = []
+        for x1, y1, x2, y2 in lines:
+            a = np.degrees(np.arctan2(y2 - y1, x2 - x1))
+            while a < 0: a += 180
+            if abs(a - 90.0) < 15.0:
+                l = np.hypot(x2 - x1, y2 - y1)
+                x_mid = (x1 + x2) / 2.0
+                vert.append((x1, y1, x2, y2, l, x_mid, a))
+
+        if not horiz:
+            return None
+
+        horiz.sort(key=lambda x: x[5])
+        top_line_data = horiz[0]
+        bot_line_data = horiz[-1]
+
+        # Must span at least 40% of image height
+        if (bot_line_data[5] - top_line_data[5]) < h * 0.4:
+            return None
+
+        l_top = cls.line_from_points((top_line_data[0], top_line_data[1]), (top_line_data[2], top_line_data[3]))
+        l_bot = cls.line_from_points((bot_line_data[0], bot_line_data[1]), (bot_line_data[2], bot_line_data[3]))
+
+        if vert:
+            vert.sort(key=lambda x: x[5])
+            left_line_data = vert[0]
+            right_line_data = vert[-1]
+
+            if left_line_data[5] < w * 0.25:
+                l_left = cls.line_from_points((left_line_data[0], left_line_data[1]), (left_line_data[2], left_line_data[3]))
+            else:
+                l_left = cls.line_from_points((0, 0), (0, h))
+
+            if right_line_data[5] > w * 0.75:
+                l_right = cls.line_from_points((right_line_data[0], right_line_data[1]), (right_line_data[2], right_line_data[3]))
+            else:
+                l_right = cls.line_from_points((w - 1, 0), (w - 1, h))
+        else:
+            l_left = cls.line_from_points((0, 0), (0, h))
+            l_right = cls.line_from_points((w - 1, 0), (w - 1, h))
+
+        tl = cls.line_intersection(l_top, l_left)
+        tr = cls.line_intersection(l_top, l_right)
+        br = cls.line_intersection(l_bot, l_right)
+        bl = cls.line_intersection(l_bot, l_left)
+
+        if any(p is None for p in [tl, tr, br, bl]):
+            return None
+
+        # Extend top-right if bottom-right reaches right border but top-right was cut early
+        if br[0] >= w - 15 and tr[0] < w - 25:
+            slope_top = (top_line_data[3] - top_line_data[1]) / max(1e-5, (top_line_data[2] - top_line_data[0]))
+            tr[0] = float(w - 1)
+            tr[1] = top_line_data[1] + slope_top * (tr[0] - top_line_data[0])
+
+        quad = np.array([tl, tr, br, bl], dtype=np.float32)
+        quad[:, 0] = np.clip(quad[:, 0], 0, w - 1)
+        quad[:, 1] = np.clip(quad[:, 1], 0, h - 1)
+
+        ordered = cls.order_points(quad)
+        if cls.is_valid_document_quad(ordered, w, h):
+            return ordered
+
+        return None
+
+    @classmethod
     def find_document_corners(cls, img: np.ndarray) -> Optional[np.ndarray]:
         """
-        Detects the 4 corners of a document sheet on a contrasting or textured surface.
-        Returns ordered (4, 2) corner coordinates in original image pixel space,
-        or None if no distinct document boundary is found.
+        Full Corner Detection Pipeline:
+        Step 1: Contour-based 4-corner detection + Missing corner estimation.
+        Step 2: Line intersection fallback.
+        Returns ordered (4, 2) array: [TL, TR, BR, BL] or None.
         """
         if img is None or img.size == 0:
             return None
 
-        h, w = img.shape[:2]
-        img_area = float(h * w)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
-        content_ang = cls.detect_content_angle(gray)
-
-        # If already a clean full-page document without external background and straight, preserve as is
-        if cls.is_already_full_page(img) and abs(content_ang) < 0.8:
+        # Check if already a clean full-page scan
+        if cls.is_already_full_page(img):
             return None
 
-        pad = 20
-        # Add border padding using BORDER_REPLICATE to prevent artificial neutral gray border
-        # from corrupting saturation/contrast segmentation of real paper
-        padded = cv2.copyMakeBorder(
-            img, pad, pad, pad, pad, cv2.BORDER_REPLICATE
-        )
-        ph, pw = padded.shape[:2]
+        # Try contour detection first
+        corners = cls._detect_corners_contour(img)
+        if corners is not None:
+            return corners
 
-        # Work at a normalized resolution for robust multi-scale edge detection
-        target_dim = 800
-        if max(ph, pw) > target_dim:
-            scale = target_dim / float(max(ph, pw))
-            small = cv2.resize(padded, (int(pw * scale), int(ph * scale)), interpolation=cv2.INTER_AREA)
-        else:
-            scale = 1.0
-            small = padded
-
-        sh, sw = small.shape[:2]
-        small_area = sh * sw
-
-        smooth = cv2.bilateralFilter(small, 9, 75, 75)
-        p_gray = cv2.cvtColor(smooth, cv2.COLOR_BGR2GRAY) if len(smooth.shape) == 3 else smooth
-        hsv = cv2.cvtColor(smooth, cv2.COLOR_BGR2HSV) if len(smooth.shape) == 3 else None
-
-        masks = []
-        k_close = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
-
-        # Strategy 1: Saturation mask for white/cream paper on colored backgrounds (chairs, desks, wood)
-        if hsv is not None:
-            sat = hsv[:, :, 1]
-            val = hsv[:, :, 2]
-            _, s_thresh = cv2.threshold(sat, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-            v_mask = (val > 50).astype(np.uint8) * 255
-            sat_paper = cv2.bitwise_and(s_thresh, v_mask)
-            masks.append(('sat_otsu', cv2.morphologyEx(sat_paper, cv2.MORPH_CLOSE, k_close, borderType=cv2.BORDER_CONSTANT, borderValue=0)))
-
-        # Strategy 2: Grayscale Otsu thresholding
-        _, thresh_otsu = cv2.threshold(p_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        masks.append(('gray_otsu', cv2.morphologyEx(thresh_otsu, cv2.MORPH_CLOSE, k_close, borderType=cv2.BORDER_CONSTANT, borderValue=0)))
-
-        # Strategy 3: Adaptive thresholding on lightness
-        thresh_adapt = cv2.adaptiveThreshold(
-            p_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 25, 6
-        )
-        masks.append(('adapt', cv2.morphologyEx(thresh_adapt, cv2.MORPH_CLOSE, k_close, borderType=cv2.BORDER_CONSTANT, borderValue=0)))
-
-        valid_candidates = []
-
-        for name, mask in masks:
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            for cnt in contours:
-                area = cv2.contourArea(cnt)
-                frac = area / small_area
-                if frac < 0.10 or frac > 0.99:
-                    continue
-
-                peri = cv2.arcLength(cnt, True)
-                for eps in [0.015, 0.02, 0.025, 0.03, 0.035, 0.04]:
-                    approx = cv2.approxPolyDP(cnt, eps * peri, True)
-                    n = len(approx)
-                    raw_pts = approx.reshape(-1, 2) / scale - pad
-                    raw_pts[:, 0] = np.clip(raw_pts[:, 0], 0, w - 1)
-                    raw_pts[:, 1] = np.clip(raw_pts[:, 1], 0, h - 1)
-
-                    if n == 4 and cv2.isContourConvex(approx):
-                        ordered = cls.order_points(raw_pts)
-                        if cls.is_valid_quad(ordered, w, h, content_ang):
-                            top_v = ordered[1] - ordered[0]
-                            bot_v = ordered[2] - ordered[3]
-                            l_v = ordered[3] - ordered[0]
-                            r_v = ordered[2] - ordered[1]
-                            at = np.degrees(np.arctan2(top_v[1], top_v[0]))
-                            ab = np.degrees(np.arctan2(bot_v[1], bot_v[0]))
-                            al = np.degrees(np.arctan2(l_v[1], l_v[0]))
-                            ar = np.degrees(np.arctan2(r_v[1], r_v[0]))
-                            dtb = abs(at - ab)
-                            while dtb > 180: dtb = abs(dtb - 360)
-                            dlr = abs(al - ar)
-                            while dlr > 180: dlr = abs(dlr - 360)
-                            q_area = cv2.contourArea(ordered)
-                            score = q_area - (dtb + dlr) * 10000
-                            valid_candidates.append((score, ordered))
-                    elif 5 <= n <= 7:
-                        for combo in combinations(raw_pts, 4):
-                            q = np.array(combo, dtype=np.float32)
-                            ordered = cls.order_points(q)
-                            if cls.is_valid_quad(ordered, w, h, content_ang):
-                                top_v = ordered[1] - ordered[0]
-                                bot_v = ordered[2] - ordered[3]
-                                l_v = ordered[3] - ordered[0]
-                                r_v = ordered[2] - ordered[1]
-                                at = np.degrees(np.arctan2(top_v[1], top_v[0]))
-                                ab = np.degrees(np.arctan2(bot_v[1], bot_v[0]))
-                                al = np.degrees(np.arctan2(l_v[1], l_v[0]))
-                                ar = np.degrees(np.arctan2(r_v[1], r_v[0]))
-                                dtb = abs(at - ab)
-                                while dtb > 180: dtb = abs(dtb - 360)
-                                dlr = abs(al - ar)
-                                while dlr > 180: dlr = abs(dlr - 360)
-                                q_area = cv2.contourArea(ordered)
-                                score = q_area - (dtb + dlr) * 10000
-                                valid_candidates.append((score, ordered))
-
-        if valid_candidates:
-            valid_candidates.sort(key=lambda c: c[0], reverse=True)
-            return valid_candidates[0][1]
-
-        # If pure boundary contours failed (e.g. tilted document with background clutter), fallback to content quad!
-        c_quad = cls.find_content_quad(img, content_ang)
-        if c_quad is not None and cls.is_valid_quad(c_quad, w, h):
-            return c_quad
+        # Try line intersection fallback
+        corners = cls._detect_corners_lines(img)
+        if corners is not None:
+            return corners
 
         return None
 
@@ -378,7 +359,7 @@ class DocumentFlattener:
         cls, img: np.ndarray, safety_margin: float = 0.0
     ) -> Tuple[np.ndarray, bool]:
         """
-        Detects document corners, cuts off excess background, and warps to a flat rectangle.
+        Step 3 & 4: Computes Homography / Perspective Matrix and warps perspective to flatten.
         Returns:
             (processed_image, was_cropped_and_flattened)
         """
@@ -392,7 +373,7 @@ class DocumentFlattener:
 
         tl, tr, br, bl = quad
 
-        # Expand slightly by safety_margin (1%) to guarantee edge text, stamps, and signatures are preserved
+        # Expand slightly by safety_margin if requested
         if safety_margin > 0:
             center = np.mean([tl, tr, br, bl], axis=0)
             tl = center + (tl - center) * (1.0 + safety_margin)
@@ -400,22 +381,19 @@ class DocumentFlattener:
             br = center + (br - center) * (1.0 + safety_margin)
             bl = center + (bl - center) * (1.0 + safety_margin)
 
-            # Clamp coordinates to image boundaries
-            tl = np.clip(tl, 0, [w - 1, h - 1])
-            tr = np.clip(tr, 0, [w - 1, h - 1])
-            br = np.clip(br, 0, [w - 1, h - 1])
-            bl = np.clip(bl, 0, [w - 1, h - 1])
+            for pt in [tl, tr, br, bl]:
+                pt[0] = np.clip(pt[0], 0, w - 1)
+                pt[1] = np.clip(pt[1], 0, h - 1)
 
         # Compute output dimensions (maximum width and height of opposite edges)
-        w_a = np.linalg.norm(br - bl)
-        w_b = np.linalg.norm(tr - tl)
-        max_w = max(int(w_a), int(w_b))
+        w_top = np.linalg.norm(tr - tl)
+        w_bot = np.linalg.norm(br - bl)
+        max_w = max(int(w_top), int(w_bot))
 
-        h_a = np.linalg.norm(tr - br)
-        h_b = np.linalg.norm(tl - bl)
-        max_h = max(int(h_a), int(h_b))
+        h_left = np.linalg.norm(bl - tl)
+        h_right = np.linalg.norm(br - tr)
+        max_h = max(int(h_left), int(h_right))
 
-        # Sanity check: must be at least 100x100
         if max_w < 100 or max_h < 100:
             return img, False
 
@@ -434,7 +412,9 @@ class DocumentFlattener:
             return img, False
 
         warped = cv2.warpPerspective(
-            img, M, (max_w, max_h), flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REPLICATE
+            img, M, (max_w, max_h),
+            flags=cv2.INTER_LANCZOS4,
+            borderMode=cv2.BORDER_REPLICATE
         )
 
         # Variance guard: Warped image must NOT be a degenerate blank/solid tone
