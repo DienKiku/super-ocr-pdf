@@ -19,6 +19,7 @@ class EnhanceParams:
     upscale_factor: float = 2.0  # 1.0, 1.5, 2.0, 3.0, 4.0
     color_mode: str = "color"    # "color", "grayscale", "clean_bw"
     auto_deskew: bool = False    # Auto-straighten tilted pages
+    auto_flatten: bool = False   # Auto-crop background & perspective warp
     rotation: int = 0            # 0, 90, 180, 270 degrees
 
 
@@ -31,6 +32,7 @@ PRESETS = {
         upscale_factor=2.0,
         color_mode="color",
         auto_deskew=False,
+        auto_flatten=False,
     ),
     "clean_scan": EnhanceParams(
         sharpness=0.7,
@@ -40,6 +42,7 @@ PRESETS = {
         upscale_factor=2.0,
         color_mode="grayscale",
         auto_deskew=False,
+        auto_flatten=False,
     ),
     "crisp_bw": EnhanceParams(
         sharpness=0.6,
@@ -49,6 +52,7 @@ PRESETS = {
         upscale_factor=2.0,
         color_mode="clean_bw",
         auto_deskew=False,
+        auto_flatten=False,
     ),
     "super_res": EnhanceParams(
         sharpness=0.6,
@@ -58,6 +62,7 @@ PRESETS = {
         upscale_factor=3.0,
         color_mode="color",
         auto_deskew=False,
+        auto_flatten=False,
     ),
     "natural": EnhanceParams(
         sharpness=0.2,
@@ -67,6 +72,7 @@ PRESETS = {
         upscale_factor=1.0,
         color_mode="color",
         auto_deskew=False,
+        auto_flatten=False,
     ),
 }
 
@@ -414,6 +420,19 @@ class DocumentEnhancer:
         # Step 1: Manual Rotation
         if params.rotation != 0:
             processed = cls.rotate_image(processed, params.rotation)
+
+        if cancel_check and cancel_check():
+            return processed
+
+        # Step 1.5: Auto-Crop Background & Flatten (Perspective Correction)
+        if params.auto_flatten:
+            try:
+                from core.flattener import DocumentFlattener
+                flattened, was_flattened = DocumentFlattener.crop_and_flatten(processed)
+                if was_flattened:
+                    processed = flattened
+            except Exception:
+                pass
 
         if cancel_check and cancel_check():
             return processed

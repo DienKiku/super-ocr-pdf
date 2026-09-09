@@ -223,5 +223,52 @@ class TestSuperOCRPDF(unittest.TestCase):
         self.assertEqual(ang_after, 0.0, "After deskew, image must be straight (0.0 skew)")
 
 
+    def test_08_auto_crop_and_flatten(self):
+        """Test smart document boundary detection, background crop, and perspective rectification."""
+        from core.flattener import DocumentFlattener
+
+        # 1. Test full-page scan: should NOT be cropped (safety guard)
+        full_res, full_cropped = DocumentFlattener.crop_and_flatten(self.test_img)
+        self.assertFalse(full_cropped, "Full-page scan should not be erroneously cropped")
+
+        # 2. Test document sheet lying on a textured wooden table
+        table_h, table_w = 900, 1100
+        # Dark brown table
+        table = np.zeros((table_h, table_w, 3), dtype=np.uint8)
+        table[:, :] = [45, 75, 115]  # BGR brown wood tone
+
+        # Place a white tilted document sheet on the table
+        doc_pts = np.array([
+            [120, 100],   # Top-left
+            [950, 80],    # Top-right
+            [980, 800],   # Bottom-right
+            [80, 820]     # Bottom-left
+        ], dtype=np.int32)
+        cv2.fillPoly(table, [doc_pts], (245, 245, 245))
+
+        # Add text on the document sheet
+        cv2.putText(table, "HOA DON BAN HANG", (300, 300), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (20, 20, 20), 2)
+        cv2.putText(table, "TONG TIEN: 500,000 VND", (300, 450), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (20, 20, 20), 2)
+
+        # Run Auto-Crop & Flatten
+        flattened, was_flattened = DocumentFlattener.crop_and_flatten(table)
+        self.assertTrue(was_flattened, "Should detect document boundaries and crop the table")
+        self.assertIsNotNone(flattened)
+
+        # Verify the output is flattened to document dimensions (not table dimensions)
+        self.assertLess(flattened.shape[0], table_h, "Output height must be cropped")
+        self.assertLess(flattened.shape[1], table_w, "Output width must be cropped")
+        self.assertGreater(flattened.shape[0], 650, "Document height should be preserved")
+        self.assertGreater(flattened.shape[1], 750, "Document width should be preserved")
+
+        # Check integrated pipeline in DocumentEnhancer
+        params = EnhanceParams(auto_flatten=True, sharpness=0.5, upscale_factor=1.0)
+        pipeline_out = DocumentEnhancer.process(table, params)
+        self.assertIsNotNone(pipeline_out)
+        self.assertLess(pipeline_out.shape[0], table_h)
+        self.assertLess(pipeline_out.shape[1], table_w)
+        print(f"\n[Test] Auto-Crop & Flatten: Table ({table_w}x{table_h}) -> Document ({pipeline_out.shape[1]}x{pipeline_out.shape[0]})")
+
+
 if __name__ == "__main__":
     unittest.main()

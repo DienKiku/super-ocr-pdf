@@ -194,6 +194,15 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
+        # Auto-Crop & Flatten
+        action_crop_flatten = QAction("✂️ Cắt viền & Nắn phẳng", self)
+        action_crop_flatten.setToolTip("Tự động nhận diện 4 góc giấy, cắt bỏ viền nền thừa (bàn, sàn gỗ) và nắn phẳng trang giấy")
+        action_crop_flatten.setShortcut(QKeySequence("F4"))
+        action_crop_flatten.triggered.connect(self._toggle_crop_flatten_current)
+        toolbar.addAction(action_crop_flatten)
+
+        toolbar.addSeparator()
+
         # Scan Current OCR
         action_scan_current = QAction("🔍 Quét OCR trang này", self)
         action_scan_current.setShortcut(QKeySequence("F5"))
@@ -289,6 +298,18 @@ class MainWindow(QMainWindow):
             item.ocr_result = None
             self._trigger_enhancement(self.image_list.get_current_index())
 
+    def _toggle_crop_flatten_current(self):
+        idx = self.image_list.get_current_index()
+        if idx < 0 or idx >= len(self.image_list.items):
+            QMessageBox.information(self, "Thông báo", "Vui lòng thêm hoặc chọn một trang tài liệu để nắn phẳng.")
+            return
+
+        params = self.settings_panel.get_params()
+        params.auto_flatten = not params.auto_flatten
+        self.settings_panel.set_params(params, emit_signal=True)
+        msg = "✂️ ĐÃ BẬT tự động cắt viền thừa & nắn phẳng." if params.auto_flatten else "ĐÃ TẮT tự động cắt viền."
+        self.status_bar.showMessage(msg, 3000)
+
     def _on_apply_all_requested(self, params: EnhanceParams):
         total = len(self.image_list.items)
         if total == 0:
@@ -305,6 +326,7 @@ class MainWindow(QMainWindow):
                 upscale_factor=params.upscale_factor,
                 color_mode=params.color_mode,
                 auto_deskew=params.auto_deskew,
+                auto_flatten=params.auto_flatten,
                 rotation=rot
             )
             item.enhanced_image = None
