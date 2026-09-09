@@ -7,6 +7,8 @@ echo      DONG BO MA NGUON SUPER OCR PDF STUDIO LEN GITHUB
 echo ================================================================
 echo.
 
+if exist "C:\Program Files\Git\cmd" set "PATH=C:\Program Files\Git\cmd;%PATH%"
+
 where git >nul 2>nul
 if errorlevel 1 (
     echo [LOI] May tinh cua ban chua cai dat Git!
@@ -26,7 +28,7 @@ set /p msg="Nhap noi dung ghi chu commit (Enter de dung mac dinh): "
 if "%msg%"=="" (
     for /f "tokens=1-4 delims=/ " %%a in ('date /t') do (set mydate=%%c-%%b-%%a)
     for /f "tokens=1-2 delims=: " %%a in ('time /t') do (set mytime=%%a:%%b)
-    set msg=Cap nhat ma nguon tu dong vao luc %mytime% %mydate%
+    set msg=Cap nhat ma nguon vao luc %mytime% %mydate%
 )
 
 echo.
