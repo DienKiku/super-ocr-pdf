@@ -25,18 +25,29 @@ from ui.export_dialog import ExportDialog
 
 class AsyncEnhanceWorker(QThread):
     """Worker to run enhancement in background without lagging the GUI."""
-    enhanced_ready = Signal(int, object)  # index, enhanced np.ndarray
+    enhanced_ready = Signal(int, int, object)  # req_id, index, enhanced np.ndarray
 
-    def __init__(self, index: int, img: np.ndarray, params: EnhanceParams, parent=None):
+    def __init__(self, req_id: int, index: int, img: np.ndarray, params: EnhanceParams, parent=None):
         super().__init__(parent)
+        self.req_id = req_id
         self.index = index
         self.img = img
         self.params = params
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def is_cancelled(self) -> bool:
+        return self._cancelled
 
     def run(self):
         try:
-            enhanced = DocumentEnhancer.process(self.img, self.params)
-            self.enhanced_ready.emit(self.index, enhanced)
+            if self._cancelled:
+                return
+            enhanced = DocumentEnhancer.process(self.img, self.params, cancel_check=self.is_cancelled)
+            if not self._cancelled:
+                self.enhanced_ready.emit(self.req_id, self.index, enhanced)
         except Exception as e:
             print(f"Error in enhancement: {e}")
 
@@ -44,23 +55,33 @@ class AsyncEnhanceWorker(QThread):
 class AsyncSingleOCRWorker(QThread):
     """Worker to run single page OCR in background without freezing the GUI."""
     progress = Signal(int, int, str)
-    finished = Signal(object)  # OCRResult
+    finished = Signal(int, object)  # req_id, OCRResult
 
-    def __init__(self, img: np.ndarray, mode: str, parent=None):
+    def __init__(self, req_id: int, img: np.ndarray, mode: str, parent=None):
         super().__init__(parent)
+        self.req_id = req_id
         self.img = img
         self.mode = mode
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
 
     def run(self):
         try:
+            if self._cancelled:
+                return
             ocr = OCREngine.get_instance()
             res = ocr.recognize(self.img, mode=self.mode, progress_callback=self._on_progress)
-            self.finished.emit(res)
+            if not self._cancelled:
+                self.finished.emit(self.req_id, res)
         except Exception as e:
-            self.finished.emit(OCRResult(error=str(e)))
+            if not self._cancelled:
+                self.finished.emit(self.req_id, OCRResult(error=str(e)))
 
     def _on_progress(self, current: int, total: int, message: str):
-        self.progress.emit(current, total, message)
+        if not self._cancelled:
+            self.progress.emit(current, total, message)
 
 
 class AsyncBatchOCRWorker(QThread):
@@ -104,14 +125,24 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Super OCR & High-Res PDF Studio - Làm Nét Chữ Siêu Phân Giải & Xuất PDF")
         self.resize(1280, 800)
 
-        self.enhance_worker: Optional[AsyncEnhanceWorker] = None
+        self._enhance_req_id = 0
+        self._active_enhance_workers: List[AsyncEnhanceWorker] = []
+        self._ocr_req_id = 0
+        self._active_ocr_workers: List[AsyncSingleOCRWorker] = []
         self.batch_ocr_worker: Optional[AsyncBatchOCRWorker] = None
-        self.single_ocr_worker: Optional[AsyncSingleOCRWorker] = None
 
         self._init_ui()
         self._init_toolbar()
         self._init_statusbar()
         self._connect_signals()
+
+    def _cleanup_enhance_worker(self, worker: AsyncEnhanceWorker):
+        if worker in self._active_enhance_workers:
+            self._active_enhance_workers.remove(worker)
+
+    def _cleanup_ocr_worker(self, worker: AsyncSingleOCRWorker):
+        if worker in self._active_ocr_workers:
+            self._active_ocr_workers.remove(worker)
 
     def _init_ui(self):
         central_widget = QWidget(self)
@@ -288,22 +319,30 @@ class MainWindow(QMainWindow):
 
         item = self.image_list.items[index]
 
-        # Check if already cached
+        # Check if already cached - instant 0ms display!
         if item.enhanced_image is not None:
             self._apply_enhanced_result(index, item.enhanced_image)
             return
 
-        # Abort existing worker if running
-        if self.enhance_worker and self.enhance_worker.isRunning():
-            self.enhance_worker.terminate()
-            self.enhance_worker.wait(200)
+        # Cancel any previous enhance workers gracefully (never terminate!)
+        for w in self._active_enhance_workers:
+            w.cancel()
+
+        self._enhance_req_id += 1
+        req_id = self._enhance_req_id
 
         self.status_bar.showMessage("Đang làm nét chữ và tăng siêu phân giải...")
-        self.enhance_worker = AsyncEnhanceWorker(index, item.original_image, item.params)
-        self.enhance_worker.enhanced_ready.connect(self._on_enhance_ready)
-        self.enhance_worker.start()
+        worker = AsyncEnhanceWorker(req_id, index, item.original_image, item.params, parent=self)
+        self._active_enhance_workers.append(worker)
+        worker.enhanced_ready.connect(self._on_enhance_ready)
+        worker.finished.connect(lambda w=worker: self._cleanup_enhance_worker(w))
+        worker.start()
 
-    def _on_enhance_ready(self, index: int, enhanced: np.ndarray):
+    def _on_enhance_ready(self, req_id: int, index: int, enhanced: np.ndarray):
+        # Discard stale results from previous requests
+        if req_id != self._enhance_req_id:
+            return
+
         if 0 <= index < len(self.image_list.items):
             self.image_list.items[index].enhanced_image = enhanced
 
@@ -341,10 +380,9 @@ class MainWindow(QMainWindow):
         if item.enhanced_image is None:
             item.enhanced_image = DocumentEnhancer.process(item.original_image, item.params)
 
-        # Abort existing single OCR worker if running
-        if self.single_ocr_worker and self.single_ocr_worker.isRunning():
-            self.single_ocr_worker.terminate()
-            self.single_ocr_worker.wait(200)
+        # Cancel existing single OCR workers if running
+        for w in self._active_ocr_workers:
+            w.cancel()
 
         engine_mode = self.ocr_panel.get_selected_engine()
         if engine_mode == "gemini":
@@ -371,12 +409,19 @@ class MainWindow(QMainWindow):
         if item.rotation != 0:
             ocr_image = DocumentEnhancer.rotate_image(ocr_image, item.rotation)
 
-        self.single_ocr_worker = AsyncSingleOCRWorker(ocr_image, engine_mode, self)
-        self.single_ocr_worker.progress.connect(self.ocr_panel.set_progress)
-        self.single_ocr_worker.finished.connect(self._on_single_ocr_finished)
-        self.single_ocr_worker.start()
+        self._ocr_req_id += 1
+        req_id = self._ocr_req_id
 
-    def _on_single_ocr_finished(self, res: OCRResult):
+        worker = AsyncSingleOCRWorker(req_id, ocr_image, engine_mode, parent=self)
+        self._active_ocr_workers.append(worker)
+        worker.progress.connect(self.ocr_panel.set_progress)
+        worker.finished.connect(self._on_single_ocr_finished)
+        worker.finished.connect(lambda w=worker: self._cleanup_ocr_worker(w))
+        worker.start()
+
+    def _on_single_ocr_finished(self, req_id: int, res: OCRResult):
+        if req_id != self._ocr_req_id:
+            return
         self.ocr_panel.set_progress(0, 0)
         item = self.image_list.get_current_item()
         if item:
@@ -449,13 +494,18 @@ class MainWindow(QMainWindow):
         QMessageBox.about(self, "Giới thiệu ứng dụng", msg)
 
     def closeEvent(self, event):
-        if self.enhance_worker and self.enhance_worker.isRunning():
-            self.enhance_worker.terminate()
-            self.enhance_worker.wait(1000)
+        for w in self._active_enhance_workers:
+            w.cancel()
+            w.wait(400)
+        self._active_enhance_workers.clear()
+
         if self.batch_ocr_worker and self.batch_ocr_worker.isRunning():
             self.batch_ocr_worker.cancel()
-            self.batch_ocr_worker.wait(1000)
-        if self.single_ocr_worker and self.single_ocr_worker.isRunning():
-            self.single_ocr_worker.terminate()
-            self.single_ocr_worker.wait(1000)
+            self.batch_ocr_worker.wait(500)
+
+        for w in self._active_ocr_workers:
+            w.cancel()
+            w.wait(400)
+        self._active_ocr_workers.clear()
+
         event.accept()

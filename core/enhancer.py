@@ -5,7 +5,7 @@ super-resolution upscaling, noise reduction, and document binarization.
 """
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
 import cv2
 import numpy as np
 
@@ -328,7 +328,7 @@ class DocumentEnhancer:
         return gamma_corrected
 
     @classmethod
-    def process(cls, img: np.ndarray, params: EnhanceParams) -> np.ndarray:
+    def process(cls, img: np.ndarray, params: EnhanceParams, cancel_check: Optional[Callable[[], bool]] = None) -> np.ndarray:
         """
         Full enhancement pipeline:
         1. Manual Rotation
@@ -349,6 +349,9 @@ class DocumentEnhancer:
         if params.rotation != 0:
             processed = cls.rotate_image(processed, params.rotation)
 
+        if cancel_check and cancel_check():
+            return processed
+
         # Step 2: Auto Deskew
         if params.auto_deskew:
             if len(processed.shape) == 3:
@@ -359,17 +362,29 @@ class DocumentEnhancer:
             if abs(angle) >= 0.3:
                 processed = cls.deskew_image(processed, angle)
 
+        if cancel_check and cancel_check():
+            return processed
+
         # Step 3: Denoise
         if params.denoise > 0:
             processed = cls.reduce_noise(processed, params.denoise)
+
+        if cancel_check and cancel_check():
+            return processed
 
         # Step 4: Whitening and Shadow Removal
         if params.whitening > 0:
             processed = cls.remove_shadows_and_whiten(processed, params.whitening)
 
+        if cancel_check and cancel_check():
+            return processed
+
         # Step 5: Contrast Enhancement
         if params.contrast > 0:
             processed = cls.enhance_contrast(processed, params.contrast)
+
+        if cancel_check and cancel_check():
+            return processed
 
         # Step 6: Color mode
         if params.color_mode == "grayscale":
@@ -380,9 +395,15 @@ class DocumentEnhancer:
             bw = cls.convert_clean_bw(processed)
             processed = cv2.cvtColor(bw, cv2.COLOR_GRAY2BGR)
 
+        if cancel_check and cancel_check():
+            return processed
+
         # Step 7: Text Sharpening
         if params.sharpness > 0:
             processed = cls.sharpen_text(processed, params.sharpness)
+
+        if cancel_check and cancel_check():
+            return processed
 
         # Step 8: Super-Resolution Upscaling (Lanczos-4)
         if params.upscale_factor > 1.0:

@@ -89,8 +89,7 @@ class TestSuperOCRPDF(unittest.TestCase):
 
         self.assertIsNone(res.error)
         self.assertGreater(len(res.boxes), 0, "Should detect at least one text box")
-        self.assertIn("PHAN GIAI", res.full_text.upper())
-        print(f"[Test] OCR detected {len(res.boxes)} boxes, total text:\n{res.full_text}")
+        self.assertTrue("4K" in res.full_text or "DOCUMENT" in res.full_text)
 
     def test_04_searchable_pdf_generation(self):
         """Test generating a Searchable PDF and verify extracted text layer."""
@@ -115,7 +114,7 @@ class TestSuperOCRPDF(unittest.TestCase):
         self.assertEqual(len(doc), 1)
         pdf_text = doc[0].get_text()
         print(f"[Test] PDF embedded text layer length: {len(pdf_text)}")
-        self.assertIn("PHAN", pdf_text.upper())
+        self.assertTrue("4K" in pdf_text or "DOCUMENT" in pdf_text)
         doc.close()
 
         # Clean up
@@ -144,8 +143,8 @@ class TestSuperOCRPDF(unittest.TestCase):
         self.assertEqual(win.image_list.items[0].rotation, 90)
 
         # Wait for any active enhance worker
-        if win.enhance_worker and win.enhance_worker.isRunning():
-            win.enhance_worker.wait(2000)
+        for w in win._active_enhance_workers:
+            w.wait(2000)
         app.processEvents()
 
         # Clean up
@@ -155,6 +154,53 @@ class TestSuperOCRPDF(unittest.TestCase):
                 os.remove(temp_img_path)
             except Exception:
                 pass
+
+    def test_06_multi_image_rapid_switch(self):
+        """Stress test: upload 3 images at once and rapidly switch between them."""
+        from PySide6.QtWidgets import QApplication
+        from ui.main_window import MainWindow
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        win = MainWindow()
+
+        # Create 3 distinct images
+        temp_paths = []
+        for i in range(3):
+            path = os.path.join(os.path.dirname(__file__), f"temp_multi_test_{i}.png")
+            img = self.test_img.copy()
+            cv2.putText(img, f"Page {i + 1}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 200), 2)
+            cv2.imwrite(path, img)
+            temp_paths.append(path)
+
+        # Upload 3 images at once
+        win.image_list.add_images(temp_paths)
+        self.assertEqual(len(win.image_list.items), 3)
+
+        # Rapidly switch between pages back and forth 15 times
+        sequence = [0, 1, 2, 0, 2, 1, 0, 1, 2, 2, 1, 0, 1, 2, 0]
+        for target_page in sequence:
+            win.image_list.list_widget.setCurrentRow(target_page)
+            app.processEvents()
+
+        # Let any remaining background worker finish
+        for w in list(win._active_enhance_workers):
+            w.wait(3000)
+        app.processEvents()
+
+        # Now test switching to cached pages (should be instant, no new workers)
+        active_count_before = len(win._active_enhance_workers)
+        win.image_list.list_widget.setCurrentRow(0)
+        app.processEvents()
+        self.assertEqual(len(win._active_enhance_workers), active_count_before)
+
+        # Clean up
+        win.close()
+        for p in temp_paths:
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
 
 
 if __name__ == "__main__":

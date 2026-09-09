@@ -182,7 +182,7 @@ class SettingsPanel(QWidget):
         preset_key = self.combo_presets.currentData()
         if preset_key in PRESETS:
             p = PRESETS[preset_key]
-            self.set_params(p)
+            self.set_params(p, emit_signal=True)
 
     def _on_slider_moved(self):
         if self._is_updating_ui:
@@ -208,9 +208,10 @@ class SettingsPanel(QWidget):
 
         self.params_changed.emit(self._current_params)
 
-    def set_params(self, params: EnhanceParams):
-        """Update UI sliders from params object."""
+    def set_params(self, params: EnhanceParams, emit_signal: bool = False):
+        """Update UI sliders from params object without triggering unnecessary re-enhancement."""
         self._is_updating_ui = True
+        self._debounce_timer.stop()
         self._current_params = params
 
         self.slider_sharpness.setValue(int(params.sharpness * 100))
@@ -240,7 +241,8 @@ class SettingsPanel(QWidget):
         self.chk_deskew.setChecked(params.auto_deskew)
 
         self._is_updating_ui = False
-        self._emit_params_changed()
+        if emit_signal:
+            self._emit_params_changed()
 
     def get_params(self) -> EnhanceParams:
         return self._current_params
@@ -252,4 +254,4 @@ class SettingsPanel(QWidget):
     def _on_reset(self):
         default_preset = PRESETS["ultra_sharp"]
         self.combo_presets.setCurrentIndex(0)
-        self.set_params(default_preset)
+        self.set_params(default_preset, emit_signal=True)

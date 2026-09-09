@@ -216,13 +216,18 @@ class ImageListWidget(QWidget):
             list_item.setSizeHint(QSize(180, 95))
             self.list_widget.addItem(list_item)
 
+        target_row = -1
         if 0 <= curr_row < len(self.items):
-            self.list_widget.setCurrentRow(curr_row)
+            target_row = curr_row
         elif self.items:
-            self.list_widget.setCurrentRow(0)
+            target_row = 0
 
         self.list_widget.blockSignals(False)
-        self.count_label.setText(f"({len(self.items)} trang)")
+        if target_row >= 0:
+            if self.list_widget.currentRow() != target_row:
+                self.list_widget.setCurrentRow(target_row)
+            else:
+                self.page_selected.emit(target_row)
 
     def _generate_thumbnail(self, img: np.ndarray, rotation: int, page_num: int) -> QPixmap:
         """Create a crisp miniature thumbnail with a page badge."""
@@ -241,7 +246,7 @@ class ImageListWidget(QWidget):
 
         small = cv2.resize(disp_img, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)
         rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-        qimg = QImage(rgb.data, thumb_w, thumb_h, 3 * thumb_w, QImage.Format_RGB888)
+        qimg = QImage(rgb.data, thumb_w, thumb_h, 3 * thumb_w, QImage.Format_RGB888).copy()
         pix = QPixmap.fromImage(qimg)
         return pix
 
