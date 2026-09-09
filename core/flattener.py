@@ -7,6 +7,7 @@ Emulates professional document scanners (CamScanner, Adobe Scan, Microsoft Lens)
 """
 
 from typing import Optional, Tuple
+from itertools import combinations
 import cv2
 import numpy as np
 
@@ -167,25 +168,55 @@ class DocumentFlattener:
             return None
 
         pts = np.array(pts, dtype=np.float32)
-        rect = cv2.minAreaRect(pts)
-        (cx, cy), (rw, rh), ang = rect
+        center = np.mean(pts, axis=0)
 
-        # Angle-aware dimension expansion
-        if abs(ang) > 45:
-            dim_x, dim_y = rh, rw
-            new_dim_x = min(float(w - 4), dim_x * 1.05)
-            new_dim_y = min(float(h - 4), dim_y * 1.05)
-            exp_rect = ((cx, cy), (new_dim_y, new_dim_x), ang)
+        use_ang = content_angle if abs(content_angle) > 0.4 else 0.0
+        if use_ang != 0.0:
+            rad = -np.radians(use_ang)
+            cos_a, sin_a = np.cos(rad), np.sin(rad)
+            R = np.array([[cos_a, -sin_a], [sin_a, cos_a]])
+            rotated_pts = np.dot(pts - center, R.T)
+
+            min_u, min_v = np.min(rotated_pts, axis=0)
+            max_u, max_v = np.max(rotated_pts, axis=0)
+
+            pad_u = max(20.0, (max_u - min_u) * 0.04)
+            pad_v = max(20.0, (max_v - min_v) * 0.03)
+
+            corners_rot = np.array([
+                [min_u - pad_u, min_v - pad_v],
+                [max_u + pad_u, min_v - pad_v],
+                [max_u + pad_u, max_v + pad_v],
+                [min_u - pad_u, max_v + pad_v]
+            ], dtype=np.float32)
+
+            rad_b = np.radians(use_ang)
+            cos_b, sin_b = np.cos(rad_b), np.sin(rad_b)
+            R_b = np.array([[cos_b, -sin_b], [sin_b, cos_b]])
+            quad = np.dot(corners_rot, R_b.T) + center
+            quad[:, 0] = np.clip(quad[:, 0], 0, w - 1)
+            quad[:, 1] = np.clip(quad[:, 1], 0, h - 1)
+            return cls.order_points(quad)
         else:
-            dim_x, dim_y = rw, rh
-            new_dim_x = min(float(w - 4), dim_x * 1.05)
-            new_dim_y = min(float(h - 4), dim_y * 1.05)
-            exp_rect = ((cx, cy), (new_dim_x, new_dim_y), ang)
+            rect = cv2.minAreaRect(pts)
+            (cx, cy), (rw, rh), ang = rect
 
-        box = cv2.boxPoints(exp_rect)
-        box[:, 0] = np.clip(box[:, 0], 0, w - 1)
-        box[:, 1] = np.clip(box[:, 1], 0, h - 1)
-        return cls.order_points(box)
+            # Angle-aware dimension expansion
+            if abs(ang) > 45:
+                dim_x, dim_y = rh, rw
+                new_dim_x = min(float(w - 4), dim_x * 1.05)
+                new_dim_y = min(float(h - 4), dim_y * 1.05)
+                exp_rect = ((cx, cy), (new_dim_y, new_dim_x), ang)
+            else:
+                dim_x, dim_y = rw, rh
+                new_dim_x = min(float(w - 4), dim_x * 1.05)
+                new_dim_y = min(float(h - 4), dim_y * 1.05)
+                exp_rect = ((cx, cy), (new_dim_x, new_dim_y), ang)
+
+            box = cv2.boxPoints(exp_rect)
+            box[:, 0] = np.clip(box[:, 0], 0, w - 1)
+            box[:, 1] = np.clip(box[:, 1], 0, h - 1)
+            return cls.order_points(box)
 
     @classmethod
     def is_already_full_page(cls, img: np.ndarray) -> bool:
@@ -219,19 +250,20 @@ class DocumentFlattener:
         if img is None or img.size == 0:
             return None
 
-        # If already a clean full-page document without external background, preserve as is
-        if cls.is_already_full_page(img):
-            return None
-
         h, w = img.shape[:2]
         img_area = float(h * w)
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
         content_ang = cls.detect_content_angle(gray)
 
+        # If already a clean full-page document without external background and straight, preserve as is
+        if cls.is_already_full_page(img) and abs(content_ang) < 0.8:
+            return None
+
         pad = 20
-        # Add border padding to prevent paper edges touching frame borders from being clipped
+        # Add border padding using BORDER_REPLICATE to prevent artificial neutral gray border
+        # from corrupting saturation/contrast segmentation of real paper
         padded = cv2.copyMakeBorder(
-            img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[128, 128, 128] if len(img.shape) == 3 else 128
+            img, pad, pad, pad, pad, cv2.BORDER_REPLICATE
         )
         ph, pw = padded.shape[:2]
 
@@ -284,16 +316,51 @@ class DocumentFlattener:
                     continue
 
                 peri = cv2.arcLength(cnt, True)
-                for eps in [0.015, 0.02, 0.025, 0.03, 0.04, 0.05]:
+                for eps in [0.015, 0.02, 0.025, 0.03, 0.035, 0.04]:
                     approx = cv2.approxPolyDP(cnt, eps * peri, True)
-                    if len(approx) == 4 and cv2.isContourConvex(approx):
-                        pts = approx.reshape(4, 2) / scale - pad
-                        pts[:, 0] = np.clip(pts[:, 0], 0, w - 1)
-                        pts[:, 1] = np.clip(pts[:, 1], 0, h - 1)
-                        ordered = cls.order_points(pts)
+                    n = len(approx)
+                    raw_pts = approx.reshape(-1, 2) / scale - pad
+                    raw_pts[:, 0] = np.clip(raw_pts[:, 0], 0, w - 1)
+                    raw_pts[:, 1] = np.clip(raw_pts[:, 1], 0, h - 1)
+
+                    if n == 4 and cv2.isContourConvex(approx):
+                        ordered = cls.order_points(raw_pts)
                         if cls.is_valid_quad(ordered, w, h, content_ang):
-                            valid_candidates.append((area * 2.0, ordered))
-                            break
+                            top_v = ordered[1] - ordered[0]
+                            bot_v = ordered[2] - ordered[3]
+                            l_v = ordered[3] - ordered[0]
+                            r_v = ordered[2] - ordered[1]
+                            at = np.degrees(np.arctan2(top_v[1], top_v[0]))
+                            ab = np.degrees(np.arctan2(bot_v[1], bot_v[0]))
+                            al = np.degrees(np.arctan2(l_v[1], l_v[0]))
+                            ar = np.degrees(np.arctan2(r_v[1], r_v[0]))
+                            dtb = abs(at - ab)
+                            while dtb > 180: dtb = abs(dtb - 360)
+                            dlr = abs(al - ar)
+                            while dlr > 180: dlr = abs(dlr - 360)
+                            q_area = cv2.contourArea(ordered)
+                            score = q_area - (dtb + dlr) * 10000
+                            valid_candidates.append((score, ordered))
+                    elif 5 <= n <= 7:
+                        for combo in combinations(raw_pts, 4):
+                            q = np.array(combo, dtype=np.float32)
+                            ordered = cls.order_points(q)
+                            if cls.is_valid_quad(ordered, w, h, content_ang):
+                                top_v = ordered[1] - ordered[0]
+                                bot_v = ordered[2] - ordered[3]
+                                l_v = ordered[3] - ordered[0]
+                                r_v = ordered[2] - ordered[1]
+                                at = np.degrees(np.arctan2(top_v[1], top_v[0]))
+                                ab = np.degrees(np.arctan2(bot_v[1], bot_v[0]))
+                                al = np.degrees(np.arctan2(l_v[1], l_v[0]))
+                                ar = np.degrees(np.arctan2(r_v[1], r_v[0]))
+                                dtb = abs(at - ab)
+                                while dtb > 180: dtb = abs(dtb - 360)
+                                dlr = abs(al - ar)
+                                while dlr > 180: dlr = abs(dlr - 360)
+                                q_area = cv2.contourArea(ordered)
+                                score = q_area - (dtb + dlr) * 10000
+                                valid_candidates.append((score, ordered))
 
         if valid_candidates:
             valid_candidates.sort(key=lambda c: c[0], reverse=True)
@@ -308,7 +375,7 @@ class DocumentFlattener:
 
     @classmethod
     def crop_and_flatten(
-        cls, img: np.ndarray, safety_margin: float = 0.01
+        cls, img: np.ndarray, safety_margin: float = 0.0
     ) -> Tuple[np.ndarray, bool]:
         """
         Detects document corners, cuts off excess background, and warps to a flat rectangle.
