@@ -36,11 +36,10 @@ class OCRPanel(QWidget):
         # Group: Engine Selection
         grp_engine = QGroupBox("CÔNG NGHỆ NHẬN DIỆN OCR")
         eng_layout = QVBoxLayout(grp_engine)
-        self.combo_engine = QComboBox()
-        self.combo_engine.addItem("✨ AI Vision Thông Minh (Google Gemini - Viết tay 100%)", "gemini")
-        self.combo_engine.addItem("🇻🇳 Tiếng Việt Siêu Tốc (Hybrid AI - 2 giây, Giữ nguyên Link/Email/Số)", "vietnamese")
-        self.combo_engine.addItem("✍️ Chữ viết tay nâng cao (VietOCR Deep Learning)", "vietocr")
-        self.combo_engine.addItem("⚡ Đa ngôn ngữ / Tiếng Anh siêu tốc (RapidOCR chuẩn)", "rapid")
+        self.combo_engine.addItem("✨ AI Vision Thông Minh (Google Gemini) - Khuyên dùng: Chuẩn 100% Viết tay & In ấn", "gemini")
+        self.combo_engine.addItem("🇻🇳 Tiếng Việt Siêu Tốc (Hybrid AI Offline) - Quét văn bản in Offline 2s, Giữ Link/Số", "vietnamese")
+        self.combo_engine.addItem("⚡ Đa ngôn ngữ / Tiếng Anh (RapidOCR Offline) - Tiếng Anh & Số siêu tốc", "rapid")
+        self.combo_engine.addItem("✍️ VietOCR Deep Learning (Thử nghiệm Offline - Rất chậm trên CPU)", "vietocr")
         self.combo_engine.currentIndexChanged.connect(self._on_engine_changed)
         eng_layout.addWidget(self.combo_engine)
 

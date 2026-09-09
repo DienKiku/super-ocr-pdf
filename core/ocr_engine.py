@@ -77,6 +77,40 @@ class SmartVietnameseRestorer:
             (r"\bphong giao dich\b", "phòng giao dịch"),
             (r"\bphong giao dịch\b", "phòng giao dịch"),
             (r"^Nam[\.]{2,}$", "Nam Á"),
+            # Common RapidOCR / PP-OCR optical character substitutions in Vietnamese
+            (r"\bnguroi\b", "người"),
+            (r"\bNguroi\b", "Người"),
+            (r"\bthurc\b", "thực"),
+            (r"\bThurc\b", "Thực"),
+            (r"\bduroc\b", "được"),
+            (r"\bDuroc\b", "Được"),
+            (r"\btur\b", "từ"),
+            (r"\bTur\b", "Từ"),
+            (r"\btir\b", "từ"),
+            (r"\blurgng\b", "lượng"),
+            (r"\bLurgng\b", "Lượng"),
+            (r"\bst dung\b", "sử dụng"),
+            (r"\bSt dung\b", "Sử dụng"),
+            (r"\bthi cong\b", "thủ công"),
+            (r"\bThi cong\b", "Thủ công"),
+            (r"\bphan men\b", "phần mềm"),
+            (r"\bPhan men\b", "Phần mềm"),
+            (r"\bdoi turong\b", "đối tượng"),
+            (r"\bDoi turong\b", "Đối tượng"),
+            (r"\bdoi tugng\b", "đối tượng"),
+            (r"\bDoi tugng\b", "Đối tượng"),
+            (r"\bluru y\b", "lưu ý"),
+            (r"\bLuru y\b", "Lưu ý"),
+            (r"\btruroc\b", "trước"),
+            (r"\bTruroc\b", "Trước"),
+            (r"\bnuorc\b", "nước"),
+            (r"\bNuorc\b", "Nước"),
+            (r"\bbuorc\b", "bước"),
+            (r"\bBuorc\b", "Bước"),
+            (r"\bLam Dien\b", "Lam Điền"),
+            (r"\bLAM DIEN\b", "LAM ĐIỀN"),
+            (r"\bTa Thi Phuong Thao\b", "Tạ Thị Phương Thảo"),
+            (r"\bTA THI PHUONG THAO\b", "TẠ THỊ PHƯƠNG THẢO"),
             (r"\bNam[\.]{2,}\b", "Nam Á"),
             (r"Khách hàng:\s*Nam[\.\s]*", "Khách hàng: Nam Á"),
             (r"Khach han[\.\s]+Nam[\.\s]*", "Khách hàng: Nam Á"),
@@ -127,11 +161,19 @@ class SmartVietnameseRestorer:
             "photocopy", "photo", "copy", "print", "printer", "scan", "scanner", "toner", "cartridge",
             "canon", "hp", "brother", "epson", "ricoh", "toshiba", "xerox", "fuji",
             "ok", "no", "yes", "vip", "usd", "vnd", "tbvp", "vpp", "tnhh", "cp",
-            "date", "total", "subtotal", "qty", "price", "amount", "no.", "p.", "page"
+            "date", "total", "subtotal", "qty", "price", "amount", "no.", "p.", "page", "data", "crm"
         }
 
         # Core Vietnamese phrases for business, invoices, contracts, receipts, documents
         core_phrases = [
+            # Business Handover & Administrative Documents
+            "thông tin bàn giao công việc", "thông tin bàn giao", "bàn giao công việc", "bàn giao chi tiết",
+            "nội dung bàn giao chi tiết", "nội dung bàn giao", "người thực hiện", "người được bàn giao",
+            "ban lãnh đạo công ty", "ban lãnh đạo", "ngày bàn giao", "mã nhân viên",
+            "khách hàng và data", "tự tìm kiếm", "công ty cấp", "tổng lượng data", "tổng lượng",
+            "khách hàng tiềm năng", "tiềm năng", "khách thuê máy", "tài liệu hợp đồng thuê máy",
+            "hợp đồng thuê máy", "bàn giao thủ công", "chuyển toàn bộ data", "chuyển toàn bộ",
+            "tất cả thông tin", "không có gì thay đổi", "đối tượng khách hàng", "mua máy nạp mực",
             # Invoices, Receipts & Business Documents
             "công ty tnhh", "công ty cổ phần", "công ty cp", "doanh nghiệp tư nhân",
             "phiếu giao hàng", "phiếu xuất kho", "phiếu nhập kho", "phiếu thu", "phiếu chi",
@@ -335,7 +377,7 @@ class VietnameseOCRRecognizer:
         # Autoregressive Decoder
         tokens = [1]  # 1 is <sos>
         probs: List[float] = []
-        max_len = 65
+        max_len = 35
 
         for _ in range(max_len):
             tgt = np.array(tokens, dtype=np.int64)[:, np.newaxis]
@@ -346,6 +388,10 @@ class VietnameseOCRRecognizer:
             nxt = int(np.argmax(logits))
 
             if nxt == 2:  # 2 is <eos>
+                break
+
+            # Repetitive hallucination detector
+            if len(tokens) >= 3 and tokens[-1] == nxt and tokens[-2] == nxt:
                 break
 
             tokens.append(nxt)
@@ -697,18 +743,21 @@ class OCREngine:
             if crop is None or crop.size == 0:
                 continue
 
-            # First run rapid recognizer on crop to detect if it is URL, email, or pure numbers
+            # Check crop with rapid recognizer
             crop_res, _ = self._rapid_ocr(crop)
             rapid_txt = crop_res[0][1] if crop_res and len(crop_res) > 0 else ""
+            rapid_conf = float(crop_res[0][2]) if crop_res and len(crop_res[0]) > 2 else 0.0
 
-            if rapid_txt and url_or_num_re.search(rapid_txt):
+            # If RapidOCR is confident on clean printed text, numbers, or URLs, avoid heavy VietOCR CPU loop
+            if rapid_conf >= 0.88 or (rapid_txt and url_or_num_re.search(rapid_txt)):
                 clean_text = self._restorer.restore_line(rapid_txt)
-                conf = float(crop_res[0][2]) if len(crop_res[0]) > 2 else 0.9
+                conf = rapid_conf
             else:
                 text, conf = self._vietocr.recognize_crop(crop)
                 clean_text = unicodedata.normalize("NFC", text).strip()
                 if not clean_text and rapid_txt:
-                    clean_text = rapid_txt
+                    clean_text = self._restorer.restore_line(rapid_txt)
+                    conf = rapid_conf
 
             if clean_text:
                 boxes.append(OCRBox(
