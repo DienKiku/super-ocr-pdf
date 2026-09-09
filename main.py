@@ -1,5 +1,7 @@
 """
 Entry point for Super OCR & High-Res PDF Studio.
+Version: 2.1.0 (Dual-Engine AI Vision & High-Speed OCR)
+Updated: 2026-09-09 by Fami (fami_7006)
 """
 
 import sys
