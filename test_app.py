@@ -203,5 +203,25 @@ class TestSuperOCRPDF(unittest.TestCase):
                     pass
 
 
+    def test_07_auto_deskew_straight_and_tilted(self):
+        """Test that auto-deskew does not distort straight documents and straightens tilted ones."""
+        # 1. Straight image must return 0.0 angle
+        gray_straight = cv2.cvtColor(self.test_img, cv2.COLOR_BGR2GRAY)
+        ang_straight = DocumentEnhancer.detect_skew_angle(gray_straight)
+        self.assertEqual(ang_straight, 0.0, "Straight document must have 0.0 detected skew")
+
+        # 2. Tilted image (+5.0 degrees)
+        h, w = self.test_img.shape[:2]
+        center = (w // 2, h // 2)
+        rot_mat = cv2.getRotationMatrix2D(center, 5.0, 1.0)
+        tilted = cv2.warpAffine(self.test_img, rot_mat, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+        p = EnhanceParams(auto_deskew=True, upscale_factor=1.0)
+        deskewed = DocumentEnhancer.process(tilted, p)
+        gray_deskewed = cv2.cvtColor(deskewed, cv2.COLOR_BGR2GRAY)
+        ang_after = DocumentEnhancer.detect_skew_angle(gray_deskewed)
+        self.assertEqual(ang_after, 0.0, "After deskew, image must be straight (0.0 skew)")
+
+
 if __name__ == "__main__":
     unittest.main()

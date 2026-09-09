@@ -155,7 +155,11 @@ class SettingsPanel(QWidget):
         gl_layout.addLayout(m_header)
 
         # Auto Deskew Checkbox
-        self.chk_deskew = QCheckBox("Tự động nắn thẳng trang giấy (Auto-Deskew)")
+        self.chk_deskew = QCheckBox("Tự động nắn thẳng & chống nghiêng (Auto-Deskew)")
+        self.chk_deskew.setToolTip(
+            "Tự động phát hiện hướng nghiêng của văn bản & bảng biểu để xoay thẳng chuẩn xác.\n"
+            "Tích hợp bộ lọc thông minh (deadband) giúp giữ nguyên độ nét gốc nếu tài liệu đã thẳng."
+        )
         self.chk_deskew.stateChanged.connect(self._on_slider_moved)
         gl_layout.addWidget(self.chk_deskew)
 

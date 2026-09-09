@@ -89,79 +89,145 @@ class DocumentEnhancer:
     @staticmethod
     def detect_skew_angle(gray: np.ndarray) -> float:
         """
-        Estimate the skew angle of text lines in a document (-15 to 15 degrees)
-        using horizontal morphological dilation and contour minAreaRect.
+        Robustly estimate document skew angle (-30 to 30 degrees)
+        using multi-strategy line and text analysis:
+        1. Primary: Probabilistic Hough Line Transform on Canny edges (detects
+           horizontal table grid lines, underlines, and text baseline strokes).
+        2. Vertical line cross-validation (90-degree orthogonal lines).
+        3. Statistical IQR outlier rejection + weighted median.
+        4. Fallback: Morphological text strips for dense text documents.
+        5. Deadband threshold: angles < 0.55 degrees are clamped to 0.0 to prevent
+           degrading already-straight documents with interpolation blur.
         """
         if gray is None or gray.size == 0:
             return 0.0
 
         h, w = gray.shape[:2]
-        target_h = 900
-        if h > target_h:
-            scale = target_h / float(h)
-            small = cv2.resize(gray, (int(w * scale), target_h), interpolation=cv2.INTER_AREA)
+        target_dim = 900
+        if max(h, w) > target_dim:
+            scale = target_dim / float(max(h, w))
+            small = cv2.resize(gray, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
         else:
             small = gray
 
         sh, sw = small.shape[:2]
 
-        # Otsu threshold (inverted: text is white foreground, background is dark)
-        _, thresh = cv2.threshold(small, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        # Strategy 1: Hough Lines on Canny edges (table lines, underlines, printed text lines)
+        edges = cv2.Canny(small, 50, 150, apertureSize=3)
+        min_len = max(20, int(sw * 0.06))
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=45, minLineLength=min_len, maxLineGap=12)
 
-        # Horizontal dilation to connect letters into continuous line strips
-        k_w = max(15, sw // 30)
+        angles = []
+        weights = []
+        if lines is not None:
+            for x1, y1, x2, y2 in lines.reshape(-1, 4):
+                dx = x2 - x1
+                dy = y2 - y1
+                length = np.sqrt(dx * dx + dy * dy)
+                ang = np.degrees(np.arctan2(dy, dx))
+
+                # Near-horizontal lines (text rows, table borders, underlines)
+                if abs(ang) <= 30.0:
+                    angles.append(ang)
+                    weights.append(length)
+                # Near-vertical lines (table columns, page margins)
+                elif abs(ang) >= 60.0:
+                    vert_ang = ang - 90.0 if ang > 0 else ang + 90.0
+                    if abs(vert_ang) <= 30.0:
+                        angles.append(vert_ang)
+                        weights.append(length)
+
+        if len(angles) >= 6:
+            angles = np.array(angles)
+            weights = np.array(weights)
+
+            # Filter extreme outliers using IQR
+            q25, q75 = np.percentile(angles, [25, 75])
+            iqr = q75 - q25
+            if iqr > 0:
+                valid_mask = (angles >= q25 - 1.5 * iqr) & (angles <= q75 + 1.5 * iqr)
+                if np.any(valid_mask):
+                    angles = angles[valid_mask]
+                    weights = weights[valid_mask]
+
+            # Weighted median
+            sorted_indices = np.argsort(angles)
+            sorted_angles = angles[sorted_indices]
+            sorted_weights = weights[sorted_indices]
+            cum_weights = np.cumsum(sorted_weights)
+            cutoff = cum_weights[-1] / 2.0
+            median_idx = np.searchsorted(cum_weights, cutoff)
+            final_angle = float(sorted_angles[min(median_idx, len(sorted_angles) - 1)])
+
+            # Deadband threshold: if within 0.55 degrees, document is straight!
+            # Do NOT rotate to avoid interpolation blur, aliasing, and corner cutouts.
+            if abs(final_angle) < 0.55:
+                return 0.0
+            return final_angle
+
+        # Strategy 2: Fallback for documents without clear lines (morphological text strips)
+        _, thresh = cv2.threshold(small, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        k_w = max(20, sw // 25)
         k_h = max(2, sh // 250)
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_w, k_h))
         dilated = cv2.dilate(thresh, kernel, iterations=2)
-
         contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return 0.0
 
-        angles = []
-        min_area = sw * sh * 0.0004
-
+        fallback_angles = []
+        min_area = sw * sh * 0.0008
         for cnt in contours:
             if cv2.contourArea(cnt) < min_area:
                 continue
-
             rect = cv2.minAreaRect(cnt)
             (cx, cy), (bw, bh), angle = rect
-
             if bw < bh:
                 bw, bh = bh, bw
                 angle = angle + 90.0 if angle < 0 else angle - 90.0
-
-            # Normalize to [-45, 45]
             while angle > 45.0:
                 angle -= 90.0
             while angle < -45.0:
                 angle += 90.0
+            if bh > 0 and (bw / bh) > 3.0 and bw > (sw * 0.12):
+                if abs(angle) <= 25.0:
+                    fallback_angles.append(angle)
 
-            # Only accept genuine horizontal text lines: width > 2 * height and length > 8% of page
-            if bh > 0 and (bw / bh) > 2.0 and bw > (sw * 0.08):
-                if -15.0 <= angle <= 15.0:
-                    angles.append(angle)
+        if len(fallback_angles) >= 4:
+            med = float(np.median(fallback_angles))
+            if abs(med) < 0.55:
+                return 0.0
+            return med
 
-        if not angles:
-            return 0.0
-
-        median_angle = float(np.median(angles))
-        return median_angle if abs(median_angle) >= 0.3 else 0.0
+        return 0.0
 
     @staticmethod
     def deskew_image(img: np.ndarray, angle: float) -> np.ndarray:
-        """Deskew image by small rotation angle with clean white padding."""
-        if abs(angle) < 0.3:
+        """
+        Deskew image by rotation angle with smart border padding.
+        Samples the edge/corner background color to eliminate ugly white triangular wedges.
+        """
+        if abs(angle) < 0.55:
             return img
 
         h, w = img.shape[:2]
         center = (w // 2, h // 2)
         rot_mat = cv2.getRotationMatrix2D(center, angle, 1.0)
 
-        # Clean white padding for document edges to prevent ugly edge streaks
+        # Sample border color from image corners to seamlessly match background
         is_color = len(img.shape) == 3 and img.shape[2] == 3
-        border_val = (255, 255, 255) if is_color else 255
+        if is_color:
+            c1 = img[0:5, 0:5].reshape(-1, 3)
+            c2 = img[0:5, -5:].reshape(-1, 3)
+            c3 = img[-5:, 0:5].reshape(-1, 3)
+            c4 = img[-5:, -5:].reshape(-1, 3)
+            corners = np.concatenate([c1, c2, c3, c4], axis=0)
+            border_val = tuple(int(v) for v in np.median(corners, axis=0))
+        else:
+            c1 = img[0:5, 0:5].flatten()
+            c2 = img[0:5, -5:].flatten()
+            c3 = img[-5:, 0:5].flatten()
+            c4 = img[-5:, -5:].flatten()
+            corners = np.concatenate([c1, c2, c3, c4], axis=0)
+            border_val = int(np.median(corners))
 
         rotated = cv2.warpAffine(
             img,
@@ -359,7 +425,7 @@ class DocumentEnhancer:
             else:
                 gray_for_skew = processed
             angle = cls.detect_skew_angle(gray_for_skew)
-            if abs(angle) >= 0.3:
+            if abs(angle) >= 0.55:
                 processed = cls.deskew_image(processed, angle)
 
         if cancel_check and cancel_check():
