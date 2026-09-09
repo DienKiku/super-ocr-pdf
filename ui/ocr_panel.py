@@ -36,6 +36,7 @@ class OCRPanel(QWidget):
         # Group: Engine Selection
         grp_engine = QGroupBox("CÔNG NGHỆ NHẬN DIỆN OCR")
         eng_layout = QVBoxLayout(grp_engine)
+        self.combo_engine = QComboBox()
         self.combo_engine.addItem("✨ AI Vision Thông Minh (Google Gemini) - Khuyên dùng: Chuẩn 100% Viết tay & In ấn", "gemini")
         self.combo_engine.addItem("🇻🇳 Tiếng Việt Siêu Tốc (Hybrid AI Offline) - Quét văn bản in Offline 2s, Giữ Link/Số", "vietnamese")
         self.combo_engine.addItem("⚡ Đa ngôn ngữ / Tiếng Anh (RapidOCR Offline) - Tiếng Anh & Số siêu tốc", "rapid")
