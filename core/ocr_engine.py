@@ -30,6 +30,7 @@ class OCRResult:
     elapse_time: float = 0.0
     char_count: int = 0
     word_count: int = 0
+    extracted_fields: Dict[str, List[str]] = field(default_factory=dict)
     error: Optional[str] = None
 
 
@@ -307,114 +308,112 @@ class SmartVietnameseRestorer:
         return unicodedata.normalize('NFC', res)
 
 
-class VietnameseOCRRecognizer:
-    """Offline VietOCR Transformer ONNX model for Vietnamese handwriting & deep learning."""
+def extract_structured_fields(text: str) -> Dict[str, List[str]]:
+    """
+    Hậu xử lý (Post-processing):
+    Trích xuất thông tin có cấu trúc bằng Regex:
+    - CCCD / CMND (12 chữ số chuẩn căn cước công dân hoặc 9 chữ số CMND)
+    - Mã số thuế (MST doanh nghiệp / cá nhân)
+    - Ngày tháng (dd/mm/yyyy, dd-mm-yyyy, yyyy-mm-dd)
+    - Số tiền / Tổng cộng
+    - Số điện thoại
+    - Địa chỉ Email
+    """
+    if not text:
+        return {}
 
-    def __init__(self, models_dir: str):
-        import onnxruntime as ort
+    fields: Dict[str, List[str]] = {}
 
-        self.vocab_path = os.path.join(models_dir, "vietocr_vocab.txt")
-        self.encoder_path = os.path.join(models_dir, "vietocr_encoder.onnx")
-        self.decoder_path = os.path.join(models_dir, "vietocr_decoder.onnx")
+    # 1. CCCD / CMND
+    cccd_ctx = re.findall(
+        r'(?:Số\s*CCCD|CCCD|Số\s*CMND|CMND|Số\s*định\s*danh|Căn\s*cước|ID\s*No\.?)[:\s]*([0-9]{9,12})',
+        text, re.IGNORECASE
+    )
+    if cccd_ctx:
+        fields["cccd"] = list(dict.fromkeys(c.strip() for c in cccd_ctx))
+    else:
+        twelve_digits = re.findall(r'\b\d{12}\b', text)
+        if twelve_digits:
+            fields["cccd"] = list(dict.fromkeys(twelve_digits))
 
-        if not os.path.exists(self.vocab_path) or not os.path.exists(self.encoder_path) or not os.path.exists(self.decoder_path):
-            raise FileNotFoundError(f"VietOCR ONNX models not found in {models_dir}")
+    # 2. Mã số thuế (MST)
+    mst = re.findall(
+        r'(?:Mã\s*số\s*thuế|MST|Tax\s*Code|M\.S\.T)[:\s]*([0-9]{10}(?:-[0-9]{3})?)',
+        text, re.IGNORECASE
+    )
+    if mst:
+        fields["mst"] = list(dict.fromkeys(m.strip() for m in mst))
 
-        with open(self.vocab_path, "r", encoding="utf-8") as f:
-            self.vocab = f.read().splitlines()
+    # 3. Email
+    emails = re.findall(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', text)
+    if emails:
+        fields["emails"] = list(dict.fromkeys(emails))
 
-        sess_opts = ort.SessionOptions()
-        sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        sess_opts.intra_op_num_threads = min(4, os.cpu_count() or 2)
+    # 4. Số điện thoại (Việt Nam)
+    phones = re.findall(r'(?:(?:\+84|0)[235789][0-9]{8})\b', text)
+    if phones:
+        fields["phones"] = list(dict.fromkeys(phones))
 
-        self.enc_sess = ort.InferenceSession(
-            self.encoder_path,
-            sess_options=sess_opts,
-            providers=["CPUExecutionProvider"]
-        )
-        self.dec_sess = ort.InferenceSession(
-            self.decoder_path,
-            sess_options=sess_opts,
-            providers=["CPUExecutionProvider"]
-        )
+    # 5. Ngày tháng
+    dates = re.findall(
+        r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b',
+        text
+    )
+    if dates:
+        fields["dates"] = list(dict.fromkeys(dates))
 
-    def recognize_crop(self, crop: np.ndarray) -> Tuple[str, float]:
-        """Recognize a cropped line or word image with VietOCR."""
-        if crop is None or crop.size == 0:
-            return "", 0.0
+    # 6. Số tiền / Tổng cộng
+    amounts = re.findall(
+        r'(?:Tổng\s*tiền|Thành\s*tiền|Cộng\s*tiền|Tổng\s*cộng|Thanh\s*toán|Total)[:\s]*([0-9.,]+(?:\s*(?:VND|VNĐ|đ|đồng))?)',
+        text, re.IGNORECASE
+    )
+    if amounts:
+        fields["amounts"] = list(dict.fromkeys(a.strip() for a in amounts))
 
-        h, w = crop.shape[:2]
-        if h < 4 or w < 4:
-            return "", 0.0
+    return fields
 
-        # Skip completely blank crops
-        if len(crop.shape) == 3:
-            gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-        else:
-            gray_crop = crop
 
-        if np.std(gray_crop) < 4.0:
-            return "", 0.0
+def preprocess_for_ocr(image: np.ndarray, deskew: bool = True) -> np.ndarray:
+    """
+    Tiền xử lý ảnh đầu vào cho OCR (Preprocessing):
+    1. Làm sạch & xoay chỉnh (Deskew) để đưa dòng chữ về nằm ngang.
+    2. Tăng cường tương phản nhẹ giúp nhận diện ký tự mờ tốt hơn.
+    """
+    if image is None or image.size == 0:
+        return image
 
-        # Target height is 32, maintain aspect ratio
-        new_w = max(32, int(w / float(h) * 32))
-        new_w = min(800, (new_w + 3) // 4 * 4)  # Bound width to avoid quadratic attention blowup
-        resized = cv2.resize(crop, (new_w, 32), interpolation=cv2.INTER_AREA if h > 32 else cv2.INTER_CUBIC)
+    processed = image.copy()
 
-        if len(resized.shape) == 2:
-            rgb = cv2.cvtColor(resized, cv2.COLOR_GRAY2RGB)
-        else:
-            rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+    # Deskew (xoay chỉnh văn bản về nằm ngang)
+    if deskew:
+        try:
+            from core.enhancer import DocumentEnhancer
+            if len(processed.shape) == 3:
+                gray = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = processed
+            angle = DocumentEnhancer.detect_skew_angle(gray)
+            if abs(angle) >= 0.55:
+                processed = DocumentEnhancer.deskew_image(processed, angle)
+        except Exception:
+            pass
 
-        rgb_norm = rgb.astype(np.float32) / 255.0
-        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-        tensor = np.transpose((rgb_norm - mean) / std, (2, 0, 1))[np.newaxis, ...]
-
-        # Run Encoder
-        memory = self.enc_sess.run(None, {"image": tensor})[0]
-
-        # Autoregressive Decoder
-        tokens = [1]  # 1 is <sos>
-        probs: List[float] = []
-        max_len = 35
-
-        for _ in range(max_len):
-            tgt = np.array(tokens, dtype=np.int64)[:, np.newaxis]
-            logits = self.dec_sess.run(None, {"tokens": tgt, "memory": memory})[0][0]
-
-            exp_l = np.exp(logits - np.max(logits))
-            p = exp_l / np.sum(exp_l)
-            nxt = int(np.argmax(logits))
-
-            if nxt == 2:  # 2 is <eos>
-                break
-
-            # Repetitive hallucination detector
-            if len(tokens) >= 3 and tokens[-1] == nxt and tokens[-2] == nxt:
-                break
-
-            tokens.append(nxt)
-            probs.append(float(p[nxt]))
-
-        chars = [self.vocab[t] for t in tokens[1:] if t < len(self.vocab)]
-        text = "".join(chars)
-        conf = float(np.mean(probs)) if probs else 0.0
-
-        return text, conf
+    return processed
 
 
 class OCREngine:
-    """Offline high-speed and high-accuracy OCR Engine supporting Vietnamese, handwriting & multilingual."""
+    """
+    Hệ thống nhận diện OCR tinh gọn với đúng 2 chế độ:
+    1. 'online': Google Gemini Vision AI (chính xác 100% chữ viết tay, bảng biểu, tài liệu phức tạp).
+    2. 'offline': PP-OCR (RapidOCR ONNX) + SmartVietnameseRestorer (nhận diện siêu tốc ~2s, 100% offline, chuẩn tiếng Việt).
+    """
 
     _instance: Optional["OCREngine"] = None
 
     def __init__(self):
-        self._vietocr: Optional[VietnameseOCRRecognizer] = None
-        self._rapid_detector = None
         self._rapid_ocr = None
         self._restorer: Optional[SmartVietnameseRestorer] = None
-        self._engine_mode: str = "vietnamese"  # "vietnamese" (Hybrid AI), "vietocr" (Deep Learning), "rapid"
+        self._engine_mode: str = "offline"  # 'online' or 'offline'
 
     @classmethod
     def get_instance(cls) -> "OCREngine":
@@ -428,8 +427,11 @@ class OCREngine:
 
     @engine_mode.setter
     def engine_mode(self, mode: str):
-        if mode in ("vietnamese", "gemini", "vietocr", "rapid"):
-            self._engine_mode = mode
+        mode_lower = mode.lower().strip()
+        if mode_lower in ("online", "gemini"):
+            self._engine_mode = "online"
+        else:
+            self._engine_mode = "offline"
 
     def _init_restorer(self):
         if self._restorer is None:
@@ -437,57 +439,10 @@ class OCREngine:
             dict_path = os.path.join(base_dir, "core", "models", "viet_words.txt")
             self._restorer = SmartVietnameseRestorer(dict_path)
 
-    def _init_vietocr(self):
-        if self._vietocr is None:
-            base_dir = get_base_dir()
-            models_dir = os.path.join(base_dir, "core", "models")
-            self._vietocr = VietnameseOCRRecognizer(models_dir)
-
-    def _init_detector(self):
-        if self._rapid_detector is None:
-            from rapidocr_onnxruntime.ch_ppocr_v3_det import TextDetector
-            from rapidocr_onnxruntime.utils import read_yaml
-            from pathlib import Path
-            import rapidocr_onnxruntime
-
-            root_dir = Path(rapidocr_onnxruntime.__file__).resolve().parent
-            config = read_yaml(str(root_dir / "config.yaml"))
-
-            base_dir = get_base_dir()
-            local_det_model = os.path.join(base_dir, "core", "models", "ch_PP-OCRv3_det_infer.onnx")
-
-            det_cfg = config["Det"]
-            det_cfg["model_path"] = local_det_model if os.path.exists(local_det_model) else str(root_dir / det_cfg["model_path"])
-            det_cfg["thresh"] = 0.20           # Lower threshold to catch fine strokes
-            det_cfg["box_thresh"] = 0.35       # More sensitive to faint table text
-            det_cfg["unclip_ratio"] = 1.85     # Expand box to capture tone marks
-            det_cfg["score_mode"] = "slow"
-            det_cfg["limit_side_len"] = 1536   # High detection resolution for documents
-
-            self._rapid_detector = TextDetector(det_cfg)
-
     def _init_rapid_ocr(self):
         if self._rapid_ocr is None:
             from rapidocr_onnxruntime import RapidOCR
             self._rapid_ocr = RapidOCR()
-
-    @staticmethod
-    def get_rotate_crop_image(img: np.ndarray, points: List[List[float]]) -> Optional[np.ndarray]:
-        """Extract and un-skew a 4-point text polygon using perspective transform."""
-        pts = np.array(points, dtype=np.float32)
-        w = int(max(np.linalg.norm(pts[0] - pts[1]), np.linalg.norm(pts[2] - pts[3])))
-        h = int(max(np.linalg.norm(pts[0] - pts[3]), np.linalg.norm(pts[1] - pts[2])))
-        if w <= 0 or h <= 0:
-            return None
-
-        dst_pts = np.array([[0, 0], [w, 0], [w, h], [0, h]], dtype=np.float32)
-        M = cv2.getPerspectiveTransform(pts, dst_pts)
-        crop = cv2.warpPerspective(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
-
-        if h > w * 1.5:
-            crop = cv2.rotate(crop, cv2.ROTATE_90_COUNTERCLOCKWISE)
-
-        return crop
 
     def recognize(
         self,
@@ -496,30 +451,25 @@ class OCREngine:
         progress_callback: Optional[Callable[[int, int, str], None]] = None
     ) -> OCRResult:
         """
-        Recognize text in an image.
-        Default mode is 'vietnamese' (Hybrid AI: ~2.5s, diacritic-accurate, preserves URLs/emails/numbers).
-        'vietocr' mode: Deep Learning VietOCR for handwriting.
-        'rapid' mode: Standard Multilingual RapidOCR.
+        Nhận diện văn bản trong ảnh theo 2 chế độ:
+        - 'online': Google Gemini Cloud Vision AI
+        - 'offline': RapidOCR PP-OCR Offline + SmartVietnameseRestorer
         """
         if image is None or image.size == 0:
             return OCRResult(error="Ảnh rỗng hoặc không hợp lệ")
 
-        active_mode = mode or self._engine_mode
+        active_mode = (mode or self._engine_mode).lower().strip()
         start_time = time.time()
 
         try:
-            if active_mode == "gemini":
-                return self._recognize_gemini(image, start_time, progress_callback=progress_callback)
-            elif active_mode == "vietocr":
-                return self._recognize_vietocr(image, start_time, progress_callback)
-            elif active_mode == "rapid":
-                return self._recognize_rapid(image, start_time)
+            if active_mode in ("online", "gemini"):
+                return self._recognize_online(image, start_time, progress_callback=progress_callback)
             else:
-                return self._recognize_hybrid(image, start_time, progress_callback)
+                return self._recognize_offline(image, start_time, progress_callback=progress_callback)
         except Exception as e:
             return OCRResult(error=f"Lỗi nhận diện OCR: {str(e)}")
 
-    def _recognize_gemini(
+    def _recognize_online(
         self,
         image: np.ndarray,
         start_time: float,
@@ -527,8 +477,8 @@ class OCREngine:
         progress_callback: Optional[Callable[[int, int, str], None]] = None
     ) -> OCRResult:
         """
-        Multimodal Cloud Vision OCR using Google Gemini AI (gemini-2.5-flash / gemini-2.0-flash).
-        Achieves 100% accuracy on complex Vietnamese cursive handwriting, receipts, and tables.
+        Chế độ Online: Multimodal Cloud Vision OCR qua Google Gemini AI.
+        Đạt chuẩn 100% chữ viết tay phức tạp, phiếu thu, hóa đơn, bảng biểu.
         """
         from core.config_manager import ConfigManager
         cfg = ConfigManager.get_instance()
@@ -601,7 +551,7 @@ class OCREngine:
                 return OCRResult(error="Gemini không tìm thấy văn bản trong ảnh.")
 
             if progress_callback:
-                progress_callback(9, 10, "Đang định dạng dòng văn bản...")
+                progress_callback(9, 10, "Đang định dạng dòng văn bản & trích xuất dữ liệu...")
 
             lines = extracted_text.splitlines()
             h, w = image.shape[:2]
@@ -618,6 +568,8 @@ class OCREngine:
                     ))
 
             total_time = round(time.time() - start_time, 2)
+            extracted_fields = extract_structured_fields(extracted_text)
+
             if progress_callback:
                 progress_callback(10, 10, "Hoàn tất nhận diện!")
 
@@ -626,7 +578,8 @@ class OCREngine:
                 boxes=boxes,
                 elapse_time=total_time,
                 char_count=len(extracted_text),
-                word_count=len(extracted_text.split())
+                word_count=len(extracted_text.split()),
+                extracted_fields=extracted_fields
             )
 
         except Exception as e:
@@ -638,34 +591,44 @@ class OCREngine:
             else:
                 return OCRResult(error=f"Lỗi Gemini Vision AI: {err_str}")
 
-    def _recognize_hybrid(
+    def _recognize_offline(
         self,
         image: np.ndarray,
         start_time: float,
         progress_callback: Optional[Callable[[int, int, str], None]] = None
     ) -> OCRResult:
         """
-        Hybrid AI Engine:
-        1. RapidOCR CTC performs ultra-fast full-page detection and recognition in ~2s.
-        2. SmartVietnameseRestorer accurately restores Vietnamese diacritics while strictly
-           preserving URLs, emails, tax codes, numbers, and English acronyms.
+        Chế độ Offline:
+        1. Tiền xử lý (Preprocessing): Deskew nắn thẳng văn bản.
+        2. Nhận diện siêu tốc bằng RapidOCR (PP-OCR ONNX) trong ~1.5s - 2.5s.
+        3. Phục hồi dấu tiếng Việt chính xác qua SmartVietnameseRestorer (74.000 từ).
+        4. Hậu xử lý trích xuất trường thông tin cấu trúc (Regex).
         """
         self._init_rapid_ocr()
         self._init_restorer()
 
         if progress_callback:
-            progress_callback(1, 10, "Đang quét nhanh văn bản và bảng biểu...")
+            progress_callback(1, 10, "Đang tiền xử lý ảnh & nắn thẳng văn bản...")
 
-        raw_result, _ = self._rapid_ocr(image)
+        # Step 1: Preprocessing
+        prep_img = preprocess_for_ocr(image, deskew=True)
+
+        if progress_callback:
+            progress_callback(3, 10, "Đang quét văn bản và bảng biểu (PP-OCR Offline)...")
+
+        raw_result, _ = self._rapid_ocr(prep_img)
+
+        # Fallback to original image if deskewed produced nothing
+        if not raw_result and prep_img is not image:
+            raw_result, _ = self._rapid_ocr(image)
 
         if not raw_result:
             return OCRResult(full_text="", boxes=[], elapse_time=round(time.time() - start_time, 3))
 
-        total_lines = len(raw_result)
         boxes: List[OCRBox] = []
 
         if progress_callback:
-            progress_callback(7, 10, "Đang phục hồi dấu tiếng Việt và bảo vệ link/số...")
+            progress_callback(7, 10, "Đang phục hồi dấu tiếng Việt & hậu xử lý...")
 
         for item in raw_result:
             if len(item) >= 3:
@@ -696,6 +659,9 @@ class OCREngine:
         full_text = "\n".join(lines)
         total_time = round(time.time() - start_time, 3)
 
+        # Step 4: Structured field extraction
+        extracted_fields = extract_structured_fields(full_text)
+
         if progress_callback:
             progress_callback(10, 10, "Hoàn tất nhận diện!")
 
@@ -704,125 +670,13 @@ class OCREngine:
             boxes=sorted_boxes,
             elapse_time=total_time,
             char_count=len(full_text),
-            word_count=len(full_text.split())
+            word_count=len(full_text.split()),
+            extracted_fields=extracted_fields
         )
 
-    def _recognize_vietocr(
-        self,
-        image: np.ndarray,
-        start_time: float,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None
-    ) -> OCRResult:
-        """Deep Learning VietOCR for handwriting, with fallback protection for URLs, emails, numbers."""
-        self._init_detector()
-        self._init_vietocr()
-        self._init_rapid_ocr()
-        self._init_restorer()
-
-        raw_boxes, _ = self._rapid_detector(image)
-        if raw_boxes is None or len(raw_boxes) == 0:
-            return OCRResult(full_text="", boxes=[], elapse_time=round(time.time() - start_time, 3))
-
-        total_boxes = len(raw_boxes)
-        boxes: List[OCRBox] = []
-
-        url_or_num_re = re.compile(r'(https?://|www\.|@|MST|\b\d+(?:[\.,]\d+)+\b)', re.IGNORECASE)
-
-        for idx, poly in enumerate(raw_boxes):
-            if progress_callback and (idx % 2 == 0 or idx == total_boxes - 1):
-                progress_callback(idx + 1, total_boxes, f"Đang nhận diện chữ viết tay ({idx + 1}/{total_boxes})...")
-
-            poly_list = [[float(p[0]), float(p[1])] for p in poly]
-            xs = [p[0] for p in poly_list]
-            ys = [p[1] for p in poly_list]
-            min_x, max_x = min(xs), max(xs)
-            min_y, max_y = min(ys), max(ys)
-            bbox = (min_x, min_y, max_x - min_x, max_y - min_y)
-
-            crop = self.get_rotate_crop_image(image, poly_list)
-            if crop is None or crop.size == 0:
-                continue
-
-            # Check crop with rapid recognizer
-            crop_res, _ = self._rapid_ocr(crop)
-            rapid_txt = crop_res[0][1] if crop_res and len(crop_res) > 0 else ""
-            rapid_conf = float(crop_res[0][2]) if crop_res and len(crop_res[0]) > 2 else 0.0
-
-            # If RapidOCR is confident on clean printed text, numbers, or URLs, avoid heavy VietOCR CPU loop
-            if rapid_conf >= 0.88 or (rapid_txt and url_or_num_re.search(rapid_txt)):
-                clean_text = self._restorer.restore_line(rapid_txt)
-                conf = rapid_conf
-            else:
-                text, conf = self._vietocr.recognize_crop(crop)
-                clean_text = unicodedata.normalize("NFC", text).strip()
-                if not clean_text and rapid_txt:
-                    clean_text = self._restorer.restore_line(rapid_txt)
-                    conf = rapid_conf
-
-            if clean_text:
-                boxes.append(OCRBox(
-                    polygon=poly_list,
-                    bbox=bbox,
-                    text=clean_text,
-                    confidence=conf
-                ))
-
-        sorted_boxes = self._sort_reading_order(boxes)
-        lines = self._reconstruct_lines(sorted_boxes)
-        full_text = "\n".join(lines)
-        total_time = round(time.time() - start_time, 3)
-
-        return OCRResult(
-            full_text=full_text,
-            boxes=sorted_boxes,
-            elapse_time=total_time,
-            char_count=len(full_text),
-            word_count=len(full_text.split())
-        )
-
-    def _recognize_rapid(self, image: np.ndarray, start_time: float) -> OCRResult:
-        """Multilingual recognition using standard RapidOCR."""
-        self._init_rapid_ocr()
-        raw_result, elapse = self._rapid_ocr(image)
-
-        if not raw_result:
-            return OCRResult(full_text="", boxes=[], elapse_time=round(time.time() - start_time, 3))
-
-        boxes: List[OCRBox] = []
-        for item in raw_result:
-            if len(item) >= 3:
-                poly = [[float(p[0]), float(p[1])] for p in item[0]]
-                txt = str(item[1]).strip()
-                try:
-                    conf = float(item[2])
-                except (ValueError, TypeError):
-                    conf = 0.0
-
-                xs = [p[0] for p in poly]
-                ys = [p[1] for p in poly]
-                bbox = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
-                norm_text = unicodedata.normalize("NFC", txt)
-
-                if norm_text:
-                    boxes.append(OCRBox(
-                        polygon=poly,
-                        bbox=bbox,
-                        text=norm_text,
-                        confidence=conf
-                    ))
-
-        sorted_boxes = self._sort_reading_order(boxes)
-        lines = self._reconstruct_lines(sorted_boxes)
-        full_text = "\n".join(lines)
-        total_time = round(time.time() - start_time, 3)
-
-        return OCRResult(
-            full_text=full_text,
-            boxes=sorted_boxes,
-            elapse_time=total_time,
-            char_count=len(full_text),
-            word_count=len(full_text.split())
-        )
+    # Aliases for backward compatibility
+    _recognize_gemini = _recognize_online
+    _recognize_hybrid = _recognize_offline
 
     def _sort_reading_order(self, boxes: List[OCRBox]) -> List[OCRBox]:
         """Sort bounding boxes in natural reading order: top-down, left-right."""

@@ -89,7 +89,7 @@ class AsyncBatchOCRWorker(QThread):
     progress = Signal(int, int, str)
     finished = Signal()
 
-    def __init__(self, items: List[ImageItem], mode: str = "vietnamese", parent=None):
+    def __init__(self, items: List[ImageItem], mode: str = "offline", parent=None):
         super().__init__(parent)
         self.items = items
         self.mode = mode
@@ -406,25 +406,21 @@ class MainWindow(QMainWindow):
             w.cancel()
 
         engine_mode = self.ocr_panel.get_selected_engine()
-        if engine_mode == "gemini":
+        if engine_mode in ("online", "gemini"):
             from core.config_manager import ConfigManager
             api_key = ConfigManager.get_instance().get_gemini_api_key()
             if not api_key:
                 QMessageBox.warning(
                     self,
                     "Cần Gemini API Key",
-                    "Chế độ 'AI Vision Thông Minh (Google Gemini)' cần API Key để hoạt động.\n\n"
+                    "Chế độ '🌐 Online (Google Gemini AI)' cần API Key để hoạt động.\n\n"
                     "Vui lòng nhập API Key tại ô bên dưới mục chọn chế độ OCR và bấm 'Lưu' trước khi quét.\n"
                     "(Bạn có thể lấy API Key miễn phí tại https://aistudio.google.com)"
                 )
                 return
-            mode_label = "Google Gemini Vision AI"
-        elif engine_mode == "vietnamese":
-            mode_label = "Tiếng Việt Hybrid AI"
-        elif engine_mode == "vietocr":
-            mode_label = "Viết tay VietOCR"
+            mode_label = "Google Gemini Vision AI (Online)"
         else:
-            mode_label = "Đa ngôn ngữ RapidOCR"
+            mode_label = "PP-OCR + Smart AI (Offline)"
         # For OCR: use clean original image (rotated if user adjusted orientation)
         ocr_image = item.original_image
         if item.rotation != 0:
@@ -465,14 +461,14 @@ class MainWindow(QMainWindow):
 
         self.tabs.setCurrentWidget(self.ocr_panel)
         engine_mode = self.ocr_panel.get_selected_engine()
-        if engine_mode == "gemini":
+        if engine_mode in ("online", "gemini"):
             from core.config_manager import ConfigManager
             api_key = ConfigManager.get_instance().get_gemini_api_key()
             if not api_key:
                 QMessageBox.warning(
                     self,
                     "Cần Gemini API Key",
-                    "Chế độ 'AI Vision Thông Minh (Google Gemini)' cần API Key để hoạt động.\n\n"
+                    "Chế độ '🌐 Online (Google Gemini AI)' cần API Key để hoạt động.\n\n"
                     "Vui lòng nhập API Key tại ô bên dưới mục chọn chế độ OCR và bấm 'Lưu' trước khi quét.\n"
                     "(Bạn có thể lấy API Key miễn phí tại https://aistudio.google.com)"
                 )
@@ -507,7 +503,7 @@ class MainWindow(QMainWindow):
             "<li><b>Làm nét chữ:</b> Unsharp Masking, CLAHE, lọc viền chi tiết, khử nhòe mờ</li>"
             "<li><b>Siêu phân giải:</b> Phóng to 2x, 3x, 4x với thuật toán Lanczos-4 không vỡ hạt</li>"
             "<li><b>Tẩy trắng nền:</b> Khử bóng đổ, làm trắng trang giấy sạch sẽ</li>"
-            "<li><b>Quét OCR Đa Năng:</b> Nhận diện tiếng Việt siêu tốc (Hybrid AI) & AI Vision Thông minh (Google Gemini - chuẩn xác 100% viết tay)</li>"
+            "<li><b>Nhận diện OCR 2 Chế độ:</b> 🌐 Online (Google Gemini AI chuẩn xác 100% viết tay) & 💻 Offline (PP-OCR siêu tốc 2s không cần mạng)</li>"
             "<li><b>Xuất PDF:</b> Hỗ trợ Searchable PDF (có lớp chữ ẩn tìm kiếm/copy được) và High-Res Image PDF</li>"
             "</ul>"
             "<p><i>Phát triển bởi Fami (fami_7006)</i></p>"

@@ -83,13 +83,34 @@ class TestSuperOCRPDF(unittest.TestCase):
         self.assertGreater(var_enh, var_orig, "Enhanced image should have significantly higher edge contrast")
 
     def test_03_ocr_recognition(self):
-        """Test RapidOCR text recognition and bounding box extraction."""
+        """Test 2-mode OCR text recognition, offline mode, and structured field extraction."""
+        from core.ocr_engine import extract_structured_fields
+
         ocr = OCREngine.get_instance()
-        res = ocr.recognize(self.test_img)
+        ocr.engine_mode = "offline"
+        res = ocr.recognize(self.test_img, mode="offline")
 
         self.assertIsNone(res.error)
         self.assertGreater(len(res.boxes), 0, "Should detect at least one text box")
         self.assertTrue("4K" in res.full_text or "DOCUMENT" in res.full_text)
+
+        # Test regex structured field extraction
+        sample_doc = (
+            "CÔNG TY TNHH ABC\n"
+            "Mã số thuế: 0312345678\n"
+            "Số CCCD: 079090123456\n"
+            "Ngày: 10/09/2026\n"
+            "Email: contact@abc.vn\n"
+            "Số điện thoại: 0901234567\n"
+            "Tổng cộng: 1.500.000 VND\n"
+        )
+        fields = extract_structured_fields(sample_doc)
+        self.assertIn("079090123456", fields.get("cccd", []))
+        self.assertIn("0312345678", fields.get("mst", []))
+        self.assertIn("contact@abc.vn", fields.get("emails", []))
+        self.assertIn("0901234567", fields.get("phones", []))
+        self.assertIn("10/09/2026", fields.get("dates", []))
+        self.assertTrue(len(fields.get("amounts", [])) > 0)
 
     def test_04_searchable_pdf_generation(self):
         """Test generating a Searchable PDF and verify extracted text layer."""

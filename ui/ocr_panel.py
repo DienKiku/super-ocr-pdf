@@ -34,13 +34,11 @@ class OCRPanel(QWidget):
         layout.setSpacing(10)
 
         # Group: Engine Selection
-        grp_engine = QGroupBox("CÔNG NGHỆ NHẬN DIỆN OCR")
+        grp_engine = QGroupBox("CHẾ ĐỘ NHẬN DIỆN OCR")
         eng_layout = QVBoxLayout(grp_engine)
         self.combo_engine = QComboBox()
-        self.combo_engine.addItem("✨ AI Vision Thông Minh (Google Gemini) - Khuyên dùng: Chuẩn 100% Viết tay & In ấn", "gemini")
-        self.combo_engine.addItem("🇻🇳 Tiếng Việt Siêu Tốc (Hybrid AI Offline) - Quét văn bản in Offline 2s, Giữ Link/Số", "vietnamese")
-        self.combo_engine.addItem("⚡ Đa ngôn ngữ / Tiếng Anh (RapidOCR Offline) - Tiếng Anh & Số siêu tốc", "rapid")
-        self.combo_engine.addItem("✍️ VietOCR Deep Learning (Thử nghiệm Offline - Rất chậm trên CPU)", "vietocr")
+        self.combo_engine.addItem("🌐 Online (AI Vision Cloud) — Chuẩn 100% Viết tay & In ấn (Google Gemini)", "online")
+        self.combo_engine.addItem("💻 Offline (Mã nguồn mở Local) — Siêu tốc 2s, Miễn phí (PP-OCR + Smart AI)", "offline")
         self.combo_engine.currentIndexChanged.connect(self._on_engine_changed)
         eng_layout.addWidget(self.combo_engine)
 
@@ -80,14 +78,14 @@ class OCRPanel(QWidget):
         layout.addWidget(grp_engine)
 
         saved_key = ConfigManager.get_instance().get_gemini_api_key()
-        if not saved_key:
-            idx = self.combo_engine.findData("vietnamese")
-            if idx >= 0:
-                self.combo_engine.setCurrentIndex(idx)
+        pref = ConfigManager.get_instance().get("preferred_engine", "offline")
+        if pref in ("online", "gemini") and saved_key:
+            idx = self.combo_engine.findData("online")
         else:
-            idx = self.combo_engine.findData("gemini")
-            if idx >= 0:
-                self.combo_engine.setCurrentIndex(idx)
+            idx = self.combo_engine.findData("offline")
+
+        if idx >= 0:
+            self.combo_engine.setCurrentIndex(idx)
         self._on_engine_changed(self.combo_engine.currentIndex())
 
         # Trigger Buttons
@@ -122,8 +120,8 @@ class OCRPanel(QWidget):
         self.text_edit = QTextEdit()
         self.text_edit.setPlaceholderText(
             "Kết quả nhận diện văn bản OCR sẽ hiển thị tại đây...\n\n"
-            "Chế độ 'Tiếng Việt & Chữ viết tay' tự động nhận diện chuẩn xác 100% tiếng Việt có dấu, "
-            "hóa đơn, chứng từ, phiếu giao hàng và chữ viết tay.\n\n"
+            "• Chế độ 🌐 Online (Google Gemini AI): Chuẩn 100% chữ in, chữ viết tay, bảng biểu, hoá đơn.\n"
+            "• Chế độ 💻 Offline (PP-OCR + Smart AI): Quét siêu tốc 2s hoàn toàn Offline, khôi phục dấu tiếng Việt chuẩn xác.\n\n"
             "Bạn có thể trực tiếp chỉnh sửa văn bản trước khi xuất PDF."
         )
         layout.addWidget(self.text_edit)
@@ -147,8 +145,9 @@ class OCRPanel(QWidget):
 
     def _on_engine_changed(self, index: int):
         mode = self.combo_engine.currentData()
-        self.api_key_widget.setVisible(mode == "gemini")
+        self.api_key_widget.setVisible(mode in ("online", "gemini"))
         OCREngine.get_instance().engine_mode = mode
+        ConfigManager.get_instance().set("preferred_engine", mode)
         self.engine_changed.emit(mode)
 
     def _toggle_api_key_visibility(self):
@@ -183,9 +182,20 @@ class OCRPanel(QWidget):
             return
 
         self.text_edit.setPlainText(result.full_text)
-        self.lbl_stats.setText(
-            f"Ký tự: {result.char_count} | Từ: {result.word_count} | Thời gian quét: {result.elapse_time}s"
-        )
+
+        stat_text = f"Ký tự: {result.char_count} | Từ: {result.word_count} | Thời gian: {result.elapse_time}s"
+        if getattr(result, "extracted_fields", None):
+            tags = []
+            if "cccd" in result.extracted_fields:
+                tags.append(f"CCCD: {', '.join(result.extracted_fields['cccd'])}")
+            if "mst" in result.extracted_fields:
+                tags.append(f"MST: {', '.join(result.extracted_fields['mst'])}")
+            if "amounts" in result.extracted_fields:
+                tags.append(f"Tiền: {result.extracted_fields['amounts'][0]}")
+            if tags:
+                stat_text += f" | 📌 {' • '.join(tags)}"
+
+        self.lbl_stats.setText(stat_text)
 
     def get_text(self) -> str:
         return self.text_edit.toPlainText()

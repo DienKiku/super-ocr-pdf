@@ -20,7 +20,7 @@ class ConfigManager:
         self.data = {
             "gemini_api_key": os.environ.get("GEMINI_API_KEY", ""),
             "gemini_model": "gemini-3.6-flash",
-            "preferred_engine": "vietnamese",
+            "preferred_engine": "offline",
         }
         self.load()
 
@@ -43,6 +43,13 @@ class ConfigManager:
                     "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.0-flash-exp"
                 ):
                     self.data["gemini_model"] = "gemini-3.6-flash"
+                    self.save()
+                # Auto-migrate deprecated engine names
+                if self.data.get("preferred_engine") in ("vietnamese", "rapid", "vietocr"):
+                    self.data["preferred_engine"] = "offline"
+                    self.save()
+                elif self.data.get("preferred_engine") == "gemini":
+                    self.data["preferred_engine"] = "online"
                     self.save()
             except Exception as e:
                 print(f"Warning loading config: {e}")
