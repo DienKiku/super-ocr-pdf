@@ -419,8 +419,10 @@ class MainWindow(QMainWindow):
                 )
                 return
             mode_label = "Google Gemini Vision AI (Online)"
+        elif engine_mode in ("qwen", "qwen3"):
+            mode_label = "Qwen-3 / Vision LM Local"
         else:
-            mode_label = "PP-OCR + Smart AI (Offline)"
+            mode_label = "PaddleOCR DBNet + Smart AI (Offline)"
         # For OCR: use clean original image (rotated if user adjusted orientation)
         ocr_image = item.original_image
         if item.rotation != 0:

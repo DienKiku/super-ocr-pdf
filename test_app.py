@@ -83,8 +83,13 @@ class TestSuperOCRPDF(unittest.TestCase):
         self.assertGreater(var_enh, var_orig, "Enhanced image should have significantly higher edge contrast")
 
     def test_03_ocr_recognition(self):
-        """Test 2-mode OCR text recognition, offline mode, and structured field extraction."""
-        from core.ocr_engine import extract_structured_fields
+        """Test PaddleOCR offline recognition, full preprocessing, CCCD extraction, and Qwen fallback."""
+        from core.ocr_engine import extract_structured_fields, preprocess_for_ocr
+
+        # Test preprocessing pipeline
+        prep = preprocess_for_ocr(self.test_img, deskew=True, denoise=True, enhance_contrast=True)
+        self.assertIsNotNone(prep)
+        self.assertEqual(len(prep.shape), 3)
 
         ocr = OCREngine.get_instance()
         ocr.engine_mode = "offline"
@@ -94,11 +99,21 @@ class TestSuperOCRPDF(unittest.TestCase):
         self.assertGreater(len(res.boxes), 0, "Should detect at least one text box")
         self.assertTrue("4K" in res.full_text or "DOCUMENT" in res.full_text)
 
-        # Test regex structured field extraction
+        # Test Qwen-3 fallback mode (gracefully uses PaddleOCR when Ollama is offline)
+        qwen_res = ocr.recognize(self.test_img, mode="qwen")
+        self.assertIsNone(qwen_res.error)
+        self.assertTrue(len(qwen_res.full_text) > 0)
+
+        # Test regex structured field extraction on comprehensive CCCD & invoice text
         sample_doc = (
+            "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\n"
+            "CĂN CƯỚC CÔNG DÂN\n"
+            "Số: 079090123456\n"
+            "Họ và tên: NGUYỄN VĂN AN\n"
+            "Ngày sinh: 15/08/1990\n"
+            "Nơi thường trú: 123 Đường Nguyễn Thị Thập, Phường Tân Hưng, Quận 7, TP.HCM\n"
             "CÔNG TY TNHH ABC\n"
             "Mã số thuế: 0312345678\n"
-            "Số CCCD: 079090123456\n"
             "Ngày: 10/09/2026\n"
             "Email: contact@abc.vn\n"
             "Số điện thoại: 0901234567\n"
@@ -106,6 +121,9 @@ class TestSuperOCRPDF(unittest.TestCase):
         )
         fields = extract_structured_fields(sample_doc)
         self.assertIn("079090123456", fields.get("cccd", []))
+        self.assertIn("NGUYỄN VĂN AN", fields.get("names", []))
+        self.assertIn("15/08/1990", fields.get("dob", []))
+        self.assertTrue(len(fields.get("addresses", [])) > 0)
         self.assertIn("0312345678", fields.get("mst", []))
         self.assertIn("contact@abc.vn", fields.get("emails", []))
         self.assertIn("0901234567", fields.get("phones", []))

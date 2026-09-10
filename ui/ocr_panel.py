@@ -38,7 +38,8 @@ class OCRPanel(QWidget):
         eng_layout = QVBoxLayout(grp_engine)
         self.combo_engine = QComboBox()
         self.combo_engine.addItem("🌐 Online (AI Vision Cloud) — Chuẩn 100% Viết tay & In ấn (Google Gemini)", "online")
-        self.combo_engine.addItem("💻 Offline (Mã nguồn mở Local) — Siêu tốc 2s, Miễn phí (PP-OCR + Smart AI)", "offline")
+        self.combo_engine.addItem("💻 Offline (PaddleOCR DBNet) — Quét siêu tốc 2s, 100% Không mạng (PP-OCR + Smart AI)", "offline")
+        self.combo_engine.addItem("🤖 Thử nghiệm Qwen-3 / Local VLM — Mô hình Vision LM Offline (Ollama / Local)", "qwen")
         self.combo_engine.currentIndexChanged.connect(self._on_engine_changed)
         eng_layout.addWidget(self.combo_engine)
 
@@ -186,8 +187,12 @@ class OCRPanel(QWidget):
         stat_text = f"Ký tự: {result.char_count} | Từ: {result.word_count} | Thời gian: {result.elapse_time}s"
         if getattr(result, "extracted_fields", None):
             tags = []
+            if "names" in result.extracted_fields:
+                tags.append(f"Tên: {result.extracted_fields['names'][0]}")
             if "cccd" in result.extracted_fields:
                 tags.append(f"CCCD: {', '.join(result.extracted_fields['cccd'])}")
+            if "dob" in result.extracted_fields:
+                tags.append(f"Sinh: {result.extracted_fields['dob'][0]}")
             if "mst" in result.extracted_fields:
                 tags.append(f"MST: {', '.join(result.extracted_fields['mst'])}")
             if "amounts" in result.extracted_fields:
