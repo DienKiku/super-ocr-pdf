@@ -1,18 +1,23 @@
 """
 OCR Engine Module with Hybrid Vietnamese AI & High-Speed Multilingual Recognition.
-Combines high-speed DBNet text detection + CTC recognition with context-sensitive
-Vietnamese diacritic restoration and selective VietOCR Transformer deep learning.
+Combines:
+- Bước 1: Tiền xử lý ảnh (Grayscale, Adaptive Thresholding, Auto-Deskew to 0°).
+- Bước 2: Định vị vùng chữ với PaddleOCR DBNet (Text Detection PP-OCRv4) & cắt ảnh (Crop).
+- Bước 3: Nhận diện chữ tiếng Việt bằng VietOCR (vgg_transformer, offline weights).
+- Bước 4: Hậu xử lý dữ liệu (Spatial Heuristic, Regex số điện thoại, Dictionary Matching 63 tỉnh thành).
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, Callable, Dict, Set
+from typing import List, Optional, Tuple, Callable, Dict, Any, Set
 import os
 import sys
 import time
 import re
+import difflib
 import unicodedata
 import cv2
 import numpy as np
+from PIL import Image
 
 
 @dataclass
@@ -30,7 +35,7 @@ class OCRResult:
     elapse_time: float = 0.0
     char_count: int = 0
     word_count: int = 0
-    extracted_fields: Dict[str, List[str]] = field(default_factory=dict)
+    extracted_fields: Dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
 
 
@@ -57,17 +62,179 @@ def remove_accents(s: str) -> str:
     return s2.replace('đ', 'd').replace('Đ', 'D')
 
 
+# ---------------------------------------------------------------------------
+# BỘ TỪ ĐIỂN 63 TỈNH THÀNH VIỆT NAM & CHUẨN HÓA LỖI CHÍNH TẢ / CHỮ VIẾT TAY
+# ---------------------------------------------------------------------------
+
+VIETNAM_PROVINCES = [
+    "An Giang", "Bà Rịa - Vũng Tàu", "Bắc Giang", "Bắc Kạn", "Bạc Liêu", "Bắc Ninh",
+    "Bến Tre", "Bình Định", "Bình Dương", "Bình Phước", "Bình Thuận", "Cà Mau",
+    "Cần Thơ", "Cao Bằng", "Đà Nẵng", "Đắk Lắk", "Đắk Nông", "Điện Biên", "Đồng Nai",
+    "Đồng Tháp", "Gia Lai", "Hà Giang", "Hà Nam", "Hà Nội", "Hà Tĩnh", "Hải Dương",
+    "Hải Phòng", "Hậu Giang", "Hòa Bình", "Hưng Yên", "Khánh Hòa", "Kiên Giang",
+    "Kon Tum", "Lai Châu", "Lâm Đồng", "Lạng Sơn", "Lào Cai", "Long An", "Nam Định",
+    "Nghệ An", "Ninh Bình", "Ninh Thuận", "Phú Thọ", "Phú Yên", "Quảng Bình",
+    "Quảng Nam", "Quảng Ngãi", "Quảng Ninh", "Quảng Trị", "Sóc Trăng", "Sơn La",
+    "Tây Ninh", "Thái Bình", "Thái Nguyên", "Thanh Hóa", "Thừa Thiên Huế", "Tiền Giang",
+    "TP. Hồ Chí Minh", "Trà Vinh", "Tuyên Quang", "Vĩnh Long", "Vĩnh Phúc", "Yên Bái"
+]
+
+PROVINCE_ALIASES_AND_TYPOS = {
+    # Hà Nội & biến thể nhận diện chữ viết tay
+    "ha noi": "Hà Nội",
+    "hà nọi": "Hà Nội",
+    "ha nọi": "Hà Nội",
+    "hanoi": "Hà Nội",
+    "hà nôi": "Hà Nội",
+    "hà nôi.": "Hà Nội",
+    "hn": "Hà Nội",
+    "h.n": "Hà Nội",
+    # TP. Hồ Chí Minh & biến thể
+    "tp hcm": "TP. Hồ Chí Minh",
+    "tphcm": "TP. Hồ Chí Minh",
+    "tp.hcm": "TP. Hồ Chí Minh",
+    "tp. hcm": "TP. Hồ Chí Minh",
+    "tp ho chi minh": "TP. Hồ Chí Minh",
+    "tp. ho chi minh": "TP. Hồ Chí Minh",
+    "ho chi minh": "TP. Hồ Chí Minh",
+    "hồ chí minh": "TP. Hồ Chí Minh",
+    "sai gon": "TP. Hồ Chí Minh",
+    "saigon": "TP. Hồ Chí Minh",
+    "sài gòn": "TP. Hồ Chí Minh",
+    "hcm": "TP. Hồ Chí Minh",
+    # Đà Nẵng
+    "da nang": "Đà Nẵng",
+    "đà năng": "Đà Nẵng",
+    "da năng": "Đà Nẵng",
+    "danang": "Đà Nẵng",
+    "đn": "Đà Nẵng",
+    # Hải Phòng
+    "hai phong": "Hải Phòng",
+    "haiphong": "Hải Phòng",
+    "hải phỏng": "Hải Phòng",
+    "hp": "Hải Phòng",
+    # Cần Thơ
+    "can tho": "Cần Thơ",
+    "cantho": "Cần Thơ",
+    "cần thỏ": "Cần Thơ",
+    # Bình Dương
+    "binh duong": "Bình Dương",
+    "bình duơng": "Bình Dương",
+    "binhduong": "Bình Dương",
+    "bd": "Bình Dương",
+    # Đồng Nai
+    "dong nai": "Đồng Nai",
+    "dongnai": "Đồng Nai",
+    # Bà Rịa - Vũng Tàu
+    "ba ria - vung tau": "Bà Rịa - Vũng Tàu",
+    "ba ria vung tau": "Bà Rịa - Vũng Tàu",
+    "vung tau": "Bà Rịa - Vũng Tàu",
+    "vũng tàu": "Bà Rịa - Vũng Tàu",
+    "bà rịa": "Bà Rịa - Vũng Tàu",
+    # Lâm Đồng / Đà Lạt
+    "lam dong": "Lâm Đồng",
+    "da lat": "Lâm Đồng",
+    "đà lạt": "Lâm Đồng",
+    # Khánh Hòa / Nha Trang
+    "khanh hoa": "Khánh Hòa",
+    "nha trang": "Khánh Hòa",
+    # Thừa Thiên Huế
+    "thua thien hue": "Thừa Thiên Huế",
+    "hue": "Thừa Thiên Huế",
+    "huế": "Thừa Thiên Huế",
+    # Quảng Ninh
+    "quang ninh": "Quảng Ninh",
+    "ha long": "Quảng Ninh",
+    "hạ long": "Quảng Ninh",
+    # Bắc Ninh
+    "bac ninh": "Bắc Ninh",
+    "bacninh": "Bắc Ninh",
+    # Hải Dương
+    "hai duong": "Hải Dương",
+    # Hưng Yên
+    "hung yen": "Hưng Yên",
+    # Nam Định
+    "nam dinh": "Nam Định",
+    # Thái Bình
+    "thai binh": "Thái Bình",
+    # Thanh Hóa
+    "thanh hoa": "Thanh Hóa",
+    # Nghệ An / Vinh
+    "nghe an": "Nghệ An",
+    "tp vinh": "Nghệ An",
+}
+
+
+def match_and_standardize_province(addr: str) -> Tuple[Optional[str], str]:
+    """
+    So khớp từ điển (Dictionary Matching) chứa các tỉnh thành Việt Nam
+    để nhận diện và chuẩn hóa lỗi chính tả chữ viết tay trong địa chỉ
+    (Ví dụ: '123 Cầu Giấy, Hà nọi' -> Tỉnh: 'Hà Nội', Chuẩn hóa: '123 Cầu Giấy, Hà Nội').
+    """
+    if not addr:
+        return None, addr
+
+    addr_clean = unicodedata.normalize('NFC', addr.strip())
+    addr_lower = addr_clean.lower()
+    addr_no_acc = remove_accents(addr_lower).lower()
+
+    # 1. So khớp trực tiếp alias / lỗi chính tả trên văn bản gốc
+    for alias, canonical in PROVINCE_ALIASES_AND_TYPOS.items():
+        pattern = r'(?i)\b' + re.escape(alias) + r'\b'
+        if re.search(pattern, addr_clean):
+            fixed_addr = re.sub(pattern, canonical, addr_clean)
+            return canonical, fixed_addr
+
+    # 2. So khớp alias / lỗi chính tả trên chuỗi không dấu (đồng bộ vị trí ký tự 1:1)
+    for alias, canonical in PROVINCE_ALIASES_AND_TYPOS.items():
+        pattern_no_acc = r'\b' + re.escape(alias) + r'\b'
+        m = re.search(pattern_no_acc, addr_no_acc)
+        if m:
+            start, end = m.span()
+            fixed_addr = addr_clean[:start] + canonical + addr_clean[end:]
+            return canonical, fixed_addr
+
+    # 3. So khớp trực tiếp với 63 tỉnh thành chính thức
+    for prov in VIETNAM_PROVINCES:
+        pattern = r'(?i)\b' + re.escape(prov) + r'\b'
+        if re.search(pattern, addr_clean):
+            return prov, addr_clean
+
+    for prov in VIETNAM_PROVINCES:
+        prov_no_acc = remove_accents(prov.lower())
+        pattern_no_acc = r'\b' + re.escape(prov_no_acc) + r'\b'
+        m = re.search(pattern_no_acc, addr_no_acc)
+        if m:
+            start, end = m.span()
+            fixed_addr = addr_clean[:start] + prov + addr_clean[end:]
+            return prov, fixed_addr
+
+    # 4. Fuzzy matching cho chữ viết ngoáy
+    words = [w.strip(" ,.-;") for w in addr_clean.split()]
+    for i in range(len(words)):
+        for length in (2, 3, 4):
+            if i + length <= len(words):
+                chunk = " ".join(words[i:i + length])
+                chunk_no_acc = remove_accents(chunk.lower())
+                for prov in VIETNAM_PROVINCES:
+                    prov_no_acc = remove_accents(prov.lower())
+                    ratio = difflib.SequenceMatcher(None, chunk_no_acc, prov_no_acc).ratio()
+                    if ratio >= 0.82:
+                        fixed_addr = addr_clean.replace(chunk, prov)
+                        return prov, fixed_addr
+
+    return None, addr_clean
+
+
 class SmartVietnameseRestorer:
     """
-    High-precision Vietnamese diacritic restorer.
-    Runs in < 10ms using n-gram greedy matching (5-grams to 1-grams) with O(1) hash lookups.
-    Guarantees 100% preservation of URLs, emails, tax codes, numbers, dates, and English acronyms.
+    High-precision Vietnamese diacritic restorer & typo fixer.
+    Runs in < 10ms using n-gram greedy matching with O(1) hash lookups.
     """
 
     def __init__(self, dict_path: Optional[str] = None):
         self.ngram_dict: Dict[str, str] = {}
 
-        # Domain typos commonly seen from OCR on Vietnamese receipts, invoices, contracts & documents
         self.typo_fixes = [
             (r"\bCONG TY TNHHMAI\b", "CÔNG TY TNHH MAI"),
             (r"\bTNHHMAI\b", "TNHH MAI"),
@@ -77,8 +244,6 @@ class SmartVietnameseRestorer:
             (r"\bPHONG GIAO DỊCH\b", "PHÒNG GIAO DỊCH"),
             (r"\bphong giao dich\b", "phòng giao dịch"),
             (r"\bphong giao dịch\b", "phòng giao dịch"),
-            (r"^Nam[\.]{2,}$", "Nam Á"),
-            # Common RapidOCR / PP-OCR optical character substitutions in Vietnamese
             (r"\bnguroi\b", "người"),
             (r"\bNguroi\b", "Người"),
             (r"\bthurc\b", "thực"),
@@ -98,256 +263,89 @@ class SmartVietnameseRestorer:
             (r"\bPhan men\b", "Phần mềm"),
             (r"\bdoi turong\b", "đối tượng"),
             (r"\bDoi turong\b", "Đối tượng"),
-            (r"\bdoi tugng\b", "đối tượng"),
-            (r"\bDoi tugng\b", "Đối tượng"),
-            (r"\bluru y\b", "lưu ý"),
-            (r"\bLuru y\b", "Lưu ý"),
-            (r"\btruroc\b", "trước"),
-            (r"\bTruroc\b", "Trước"),
-            (r"\bnuorc\b", "nước"),
-            (r"\bNuorc\b", "Nước"),
-            (r"\bbuorc\b", "bước"),
-            (r"\bBuorc\b", "Bước"),
-            (r"\bLam Dien\b", "Lam Điền"),
-            (r"\bLAM DIEN\b", "LAM ĐIỀN"),
-            (r"\bTa Thi Phuong Thao\b", "Tạ Thị Phương Thảo"),
-            (r"\bTA THI PHUONG THAO\b", "TẠ THỊ PHƯƠNG THẢO"),
-            (r"\bNam[\.]{2,}\b", "Nam Á"),
-            (r"Khách hàng:\s*Nam[\.\s]*", "Khách hàng: Nam Á"),
-            (r"Khach han[\.\s]+Nam[\.\s]*", "Khách hàng: Nam Á"),
-            (r"Khách han[\.\s]+Nam[\.\s]*", "Khách hàng: Nam Á"),
-            (r"\bKhach han[\.\s]+", "Khách hàng: "),
-            (r"\bKhách han[\.\s]+", "Khách hàng: "),
-            (r"\.\.Nguoilienhe\.\.", "Người liên hệ:"),
-            (r"\.\.Người liên hệ\.\.", "Người liên hệ:"),
-            (r"\bPHOHOCH\b", "TP.HCM"),
-            (r"\bPHOHO\b", "TP.HCM"),
-            (r"\b450\.c00\b", "1  Nạp mực 87  01  150.000  150.000"),
-            (r"\bmm280\s*05\s*240\.000\b", "2  Nạp mực 80  03  70.000  210.000"),
-            (r"\bmm280\b", "2  Nạp mực 80  03  70.000  210.000"),
             (r"\bdja chi\b", "địa chỉ"),
             (r"\bDja chi\b", "Địa chỉ"),
-            (r"\bdja\b", "địa"),
-            (r"\bDja\b", "Địa"),
             (r"\bdien thogi\b", "điện thoại"),
             (r"\bDien thogi\b", "Điện thoại"),
-            (r"\bthogi\b", "thoại"),
             (r"\bnguoilienhe\b", "người liên hệ"),
             (r"\bNguoilienhe\b", "Người liên hệ"),
-            (r"\bnhan vien ky thust\b", "nhân viên kỹ thuật"),
-            (r"\bNhan vien ky thust\b", "Nhân viên kỹ thuật"),
-            (r"\bky thust\b", "kỹ thuật"),
-            (r"\bkhich hiang ky nhan\b", "khách hàng ký nhận"),
-            (r"\bKhich hiang ky nhan\b", "Khách hàng ký nhận"),
             (r"\bkhich hiang\b", "khách hàng"),
             (r"\bKhich hiang\b", "Khách hàng"),
-            (r"\bching tir kem\b", "chứng từ kèm"),
-            (r"\bChing tir kem\b", "Chứng từ kèm"),
-            (r"\bching tir\b", "chứng từ"),
-            (r"\bChing tir\b", "Chứng từ"),
-            (r"\btien thuegtgt\b", "tiền thuế GTGT"),
-            (r"\bTien thueGTGT\b", "Tiền thuế GTGT"),
-            (r"\bchothue\b", "cho thuê"),
-            (r"\bCHOTHUE\b", "CHO THUÊ"),
-            (r"\bvppgiayin\b", "vpp giấy in"),
-            (r"\bVPPGIAYIN\b", "VPP GIẤY IN"),
-            (r"\bTBVP:MAY IN\b", "TBVP: MÁY IN"),
-            (r"\btbvp:may in\b", "tbvp: máy in"),
-            # Common OCR typos in Vietnamese ID / CCCD / Administrative docs
             (r"\bCAN CUOC CONG DAN\b", "CĂN CƯỚC CÔNG DÂN"),
             (r"\bcan cuoc cong dan\b", "căn cước công dân"),
             (r"\bCan cuoc cong dan\b", "Căn cước công dân"),
             (r"\bCONG HOA XA HOI CHU NGHIA VIET NAM\b", "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM"),
             (r"\bDOC LAP - TU DO - HANH PHUC\b", "ĐỘC LẬP - TỰ DO - HẠNH PHÚC"),
-            (r"\bNOI THUONG TRU\b", "NƠI THƯỜNG TRÚ"),
-            (r"\bnoi thuong tru\b", "nơi thường trú"),
-            (r"\bQUE QUAN\b", "QUÊ QUÁN"),
-            (r"\bque quan\b", "quê quán"),
-            (r"\bHO VA TEN\b", "HỌ VÀ TÊN"),
-            (r"\bho va ten\b", "họ và tên"),
-            (r"\bNGAY SINH\b", "NGÀY SINH"),
-            (r"\bngay sinh\b", "ngày sinh"),
-            (r"\bQUOC TICH\b", "QUỐC TỊCH"),
-            (r"\bquoc tich\b", "quốc tịch"),
-            (r"\bGIOI TINH\b", "GIỚI TÍNH"),
-            (r"\bgioi tinh\b", "giới tính"),
-            (r"\bCO GIA TRI DEN\b", "CÓ GIÁ TRỊ ĐẾN"),
-            (r"\bco gia tri den\b", "có giá trị đến"),
-            (r"\bTong tien\b", "Tổng tiền"),
-            (r"\btong tien\b", "tổng tiền"),
-            (r"\bTống tiền\b", "Tổng tiền"),
-            (r"\btống tiền\b", "tổng tiền"),
-            (r"\bTONG TIEN\b", "TỔNG TIỀN"),
-            (r"\bTHANH TIEN\b", "THÀNH TIỀN"),
-            (r"\bthanh tien\b", "thành tiền"),
-            (r"\bCONG TIEN\b", "CỘNG TIỀN"),
-            (r"\bcong tien\b", "cộng tiền"),
-            (r"\bSo:\s*", "Số: "),
-            (r"\bSO:\s*", "SỐ: "),
-            (r"\bDuong Nguyen Thi Thap\b", "Đường Nguyễn Thị Thập"),
-            (r"\bduong nguyen thi thap\b", "đường nguyễn thị thập"),
-            (r"\bNGUYEN VAN\b", "NGUYỄN VĂN"),
-            (r"\bNguyen Van\b", "Nguyễn Văn"),
-            (r"\bnguyen van\b", "nguyễn văn"),
         ]
 
-        # Protected English words & Technical acronyms that should NEVER have Vietnamese accents
-        self.protected_english: Set[str] = {
-            "email", "mail", "website", "web", "http", "https", "www", "com", "vn", "net", "org",
-            "mst", "stt", "dvt", "sl", "gtgt", "vat", "fax", "tel", "phone", "hotline",
-            "photocopy", "photo", "copy", "print", "printer", "scan", "scanner", "toner", "cartridge",
-            "canon", "hp", "brother", "epson", "ricoh", "toshiba", "xerox", "fuji",
-            "ok", "no", "yes", "vip", "usd", "vnd", "tbvp", "vpp", "tnhh", "cp",
-            "date", "total", "subtotal", "qty", "price", "amount", "no.", "p.", "page", "data", "crm",
-            "sex", "id", "dob"
-        }
-
-        # Core Vietnamese phrases for business, invoices, contracts, receipts, documents
-        core_phrases = [
-            # National & CCCD Identification Documents
-            "cộng hòa xã hội chủ nghĩa việt nam", "độc lập tự do hạnh phúc",
-            "căn cước công dân", "chứng minh nhân dân", "thẻ căn cước", "căn cước",
-            "họ và tên", "ngày sinh", "giới tính", "quốc tịch", "quê quán",
-            "nơi thường trú", "nơi cư trú", "nơi tạm trú", "địa chỉ thường trú",
-            "có giá trị đến", "ngày hết hạn", "ngày cấp", "nơi cấp",
-            "cục trưởng cục cảnh sát quản lý hành chính về trật tự xã hội",
-            "đặc điểm nhận dạng", "dấu vết riêng",
-            # Business Handover & Administrative Documents
-            "thông tin bàn giao công việc", "thông tin bàn giao", "bàn giao công việc", "bàn giao chi tiết",
-            "nội dung bàn giao chi tiết", "nội dung bàn giao", "người thực hiện", "người được bàn giao",
-            "ban lãnh đạo công ty", "ban lãnh đạo", "ngày bàn giao", "mã nhân viên",
-            "khách hàng và data", "tự tìm kiếm", "công ty cấp", "tổng lượng data", "tổng lượng",
-            "khách hàng tiềm năng", "tiềm năng", "khách thuê máy", "tài liệu hợp đồng thuê máy",
-            "hợp đồng thuê máy", "bàn giao thủ công", "chuyển toàn bộ data", "chuyển toàn bộ",
-            "tất cả thông tin", "không có gì thay đổi", "đối tượng khách hàng", "mua máy nạp mực",
-            # Invoices, Receipts & Business Documents
-            "công ty tnhh", "công ty cổ phần", "công ty cp", "doanh nghiệp tư nhân",
-            "phiếu giao hàng", "phiếu xuất kho", "phiếu nhập kho", "phiếu thu", "phiếu chi",
-            "hóa đơn bán lẻ", "hóa đơn bán hàng", "hóa đơn giá trị gia tăng", "hóa đơn gtgt",
-            "khách hàng", "khách hàng ký nhận", "người mua hàng", "người bán hàng",
-            "địa chỉ", "điện thoại", "người liên hệ", "người giao hàng", "người nhận hàng",
-            "tên hàng", "tên sản phẩm", "quy cách", "đơn vị tính", "đơn giá", "thành tiền",
-            "cộng tiền hàng", "tiền thuế gtgt", "thuế gtgt", "thuế suất", "tổng tiền thanh toán",
-            "tổng tiền", "tổng cộng", "nhân viên kỹ thuật", "nhân viên bán hàng", "kế toán trưởng", "thủ kho",
-            "chứng từ kèm theo", "chứng từ kèm", "chứng từ gốc", "ngày tháng năm",
-            "số hóa đơn", "mã số thuế", "tài khoản ngân hàng", "ngân hàng", "chi nhánh",
-            # Common Names
-            "nguyễn văn an", "nguyễn văn", "trần văn", "lê văn", "phạm văn", "hoàng văn",
-            # Common Office / Tech Services
-            "trung tâm tbvp", "trung tâm thiết bị văn phòng", "thiết bị văn phòng",
-            "máy in", "cho thuê máy photocopy", "cho thuê máy", "văn phòng phẩm", "giấy in",
-            "nạp mực máy in", "nạp mực", "thay mực", "sửa chữa máy in", "sửa chữa",
-            "bảo hành", "linh kiện", "hộp mực máy in", "hộp mực", "hợp đồng kinh tế", "hợp đồng",
-            # Geography & Common Names
-            "mai song nguyên", "nam á", "nguyễn thị kim trinh", "trần thế anh",
-            "tân hưng", "quận 7", "quận 1", "quận 3", "thành phố hồ chí minh", "tp.hcm", "hà nội", "đà nẵng",
-            # General common high-frequency phrases
-            "xin chân thành cảm ơn", "chân thành cảm ơn", "cảm ơn quý khách", "hẹn gặp lại",
-            "cam kết chính hãng", "giao hàng tận nơi", "bảo hành tận nơi"
-        ]
-
-        for phrase in core_phrases:
-            raw = remove_accents(phrase).lower()
-            self.ngram_dict[raw] = phrase
-
-        # Load 74,000+ words dictionary if available
         if dict_path and os.path.exists(dict_path):
-            try:
-                with open(dict_path, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        word = line.strip()
-                        if not word or len(word) < 2:
-                            continue
-                        clean_w = unicodedata.normalize('NFC', word)
-                        raw = remove_accents(clean_w).lower()
-                        if raw not in self.ngram_dict:
-                            if raw not in self.protected_english:
-                                self.ngram_dict[raw] = clean_w
-            except Exception as e:
-                print(f"Warning loading viet_words dictionary: {e}")
+            self._load_dictionary(dict_path)
+
+    def _load_dictionary(self, path: str):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    word = line.strip()
+                    if word:
+                        normalized = unicodedata.normalize('NFC', word)
+                        stripped = remove_accents(normalized).lower()
+                        if stripped not in self.ngram_dict:
+                            self.ngram_dict[stripped] = normalized
+        except Exception:
+            pass
 
     @staticmethod
-    def match_word_case(original: str, restored: str) -> str:
-        """Preserve exact original casing for a single word."""
-        if original.isupper():
-            return restored.upper()
-        if original.istitle() or (len(original) > 0 and original[0].isupper() and original[1:].islower()):
-            return restored.capitalize()
-        if original.islower():
-            return restored.lower()
-        return restored
+    def match_word_case(orig: str, target: str) -> str:
+        if orig.isupper():
+            return target.upper()
+        if orig and orig[0].isupper():
+            return target.capitalize()
+        return target.lower()
 
     def restore_line(self, line: str) -> str:
-        """Restore diacritics in a single line while protecting URLs, emails, numbers, and technical terms."""
-        if not line or not line.strip():
+        if not line.strip():
             return line
 
-        url_re = re.compile(r'^(https?://\S+|www\.\S+|\S+\.(?:com|vn|net|org|edu|gov|io)\S*)$', re.IGNORECASE)
-        email_re = re.compile(r'^[A-Za-z0-9_\.\-]+@[A-Za-z0-9_\.\-]+\.[A-Za-z]{2,}$', re.IGNORECASE)
-        num_re = re.compile(r'^\(?\+?\d+[\d\.,/:\-xX\(\)]*\)?$')
-
-        # Pre-apply typo fixes on line
-        processed_line = line
+        cur = line
         for pat, rep in self.typo_fixes:
-            processed_line = re.sub(pat, rep, processed_line)
+            cur = re.sub(pat, rep, cur)
 
-        # Tokenize by whitespace while keeping spaces intact
-        parts = re.split(r'(\s+)', processed_line)
-        tokens = []
-        is_spaces = []
-        for p in parts:
-            if not p:
-                continue
-            tokens.append(p)
-            is_spaces.append(p.isspace())
+        tokens = re.split(r'(\s+|[^\w\s]+)', cur)
+        word_indices = [idx for idx, tok in enumerate(tokens) if re.search(r'\w', tok)]
+        words = [tokens[idx] for idx in word_indices]
 
-        word_indices = [i for i, sp in enumerate(is_spaces) if not sp]
-        n_words = len(word_indices)
-        if n_words == 0:
-            return line
+        if not words:
+            return cur
 
-        # Greedy n-gram matching from n=5 down to n=1
         i = 0
-        while i < n_words:
+        total = len(words)
+        while i < total:
             matched = False
-            for n in range(min(5, n_words - i), 0, -1):
-                curr_tokens = [tokens[word_indices[i + k]] for k in range(n)]
-                cleaned_words = [re.sub(r'^[^\w]+|[^\w]+$', '', t) for t in curr_tokens]
-
-                if any(not w for w in cleaned_words):
+            for n in range(min(5, total - i), 0, -1):
+                chunk = words[i:i + n]
+                clean_chunk = [re.sub(r'^[^\w]+|[^\w]+$', '', w) for w in chunk]
+                if any(not w for w in clean_chunk):
                     continue
 
-                phrase_raw = " ".join(remove_accents(w).lower() for w in cleaned_words)
+                phrase = " ".join(clean_chunk)
+                phrase_lower = phrase.lower()
+                stripped = remove_accents(phrase_lower)
 
-                if phrase_raw in self.ngram_dict:
-                    # Single word check: protect english words, URLs, emails, pure numbers
-                    if n == 1:
-                        w_lower = cleaned_words[0].lower()
-                        if w_lower in self.protected_english or url_re.match(w_lower) or email_re.match(w_lower) or num_re.match(w_lower):
-                            continue
-                        # If single word already has distinct Vietnamese diacritics, keep it
-                        if any(c in "àáảãạăắằẳẵặâấầẩẫậđèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵÀÁẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬĐÈÉẺẼẸÊẾỀỂỄỆÌÍỈĨỊÒÓỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÙÚỦŨỤƯỨỪỬỮỰỲÝỶỸỴ" for c in cleaned_words[0]):
-                            continue
-
-                    restored_phrase = self.ngram_dict[phrase_raw]
+                if stripped in self.ngram_dict:
+                    restored_phrase = self.ngram_dict[stripped]
                     restored_words = restored_phrase.split()
-
                     if len(restored_words) == n:
                         for k in range(n):
-                            orig_tok = curr_tokens[k]
-                            orig_clean = cleaned_words[k]
+                            orig_tok = words[i + k]
+                            orig_clean = clean_chunk[k]
                             rest_word = restored_words[k]
-
                             cased_word = self.match_word_case(orig_clean, rest_word)
-                            # Reattach leading and trailing punctuation
                             lead_punc = orig_tok[:len(orig_tok) - len(orig_tok.lstrip('^~`!@#$%^&*()_+-=[]{}|;:\'",.<>?/\\'))]
                             trail_punc = orig_tok[len(orig_tok.rstrip('^~`!@#$%^&*()_+-=[]{}|;:\'",.<>?/\\')):]
                             tokens[word_indices[i + k]] = lead_punc + cased_word + trail_punc
-
                         matched = True
                         i += n
                         break
-
             if not matched:
                 i += 1
 
@@ -355,101 +353,70 @@ class SmartVietnameseRestorer:
         return unicodedata.normalize('NFC', res)
 
 
-def extract_structured_fields(text: str) -> Dict[str, List[str]]:
-    """
-    Hậu xử lý OCR (Post-processing) - Trích xuất thông tin có cấu trúc bằng Regex:
-    - CCCD / CMND (12 chữ số định danh hoặc 9 chữ số CMND)
-    - Họ và tên (Full Name)
-    - Ngày sinh (Date of Birth)
-    - Địa chỉ / Nơi thường trú (Address)
-    - Mã số thuế (MST doanh nghiệp / cá nhân)
-    - Ngày tháng (dd/mm/yyyy, yyyy-mm-dd)
-    - Số tiền / Tổng cộng / Thành tiền
-    - Số điện thoại (Việt Nam)
-    - Địa chỉ Email
-    """
-    if not text:
-        return {}
+# ---------------------------------------------------------------------------
+# BƯỚC 1: TIỀN XỬ LÝ ẢNH (PRE-PROCESSING)
+# ---------------------------------------------------------------------------
 
-    fields: Dict[str, List[str]] = {}
+def preprocess_order_image(
+    image: np.ndarray,
+    deskew: bool = True,
+    apply_adaptive_thresh: bool = True
+) -> Tuple[np.ndarray, np.ndarray, float]:
+    """
+    Bước 1: Tiền xử lý ảnh (Pre-processing) cho đơn hàng thực tế:
+    - Xoay ảnh (Deskew): Tự động phát hiện góc nghiêng và xoay về phương ngang (0°).
+    - Hệ màu xám (Grayscale).
+    - Tăng tương phản (Adaptive Thresholding) để tách nét chữ viết tay mờ/đổ bóng.
 
-    # 1. Số CCCD / CMND
-    cccd_ctx = re.findall(
-        r'(?:Số\s*(?:CCCD|CMND|định\s*danh)?\s*[/:]*\s*(?:No\.?)?[:\s]*)([0-9]{9,12})\b',
-        text, re.IGNORECASE
-    )
-    if cccd_ctx:
-        fields["cccd"] = list(dict.fromkeys(c.strip() for c in cccd_ctx))
+    Returns:
+        (deskewed_color, thresh_img, skew_angle)
+    """
+    if image is None or image.size == 0:
+        return image, image, 0.0
+
+    from core.enhancer import DocumentEnhancer
+
+    # 1. Chuyển ảnh về Grayscale
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     else:
-        twelve_digits = re.findall(r'\b\d{12}\b', text)
-        if twelve_digits:
-            fields["cccd"] = list(dict.fromkeys(twelve_digits))
+        gray = image.copy()
 
-    # 2. Họ và tên
-    names = re.findall(
-        r'(?:Họ\s*và\s*tên(?:\s*/\s*Full\s*name)?|Full\s*name|Tên\s*khách\s*hàng|Người\s*mua\s*hàng|Người\s*liên\s*hệ)[:\s]*([^\n\r,;]{2,45})',
-        text, re.IGNORECASE
-    )
-    if names:
-        cleaned_names = [re.sub(r'^[^\w]+|[^\w]+$', '', n).strip() for n in names]
-        valid_names = [n for n in cleaned_names if len(n) > 2 and not re.search(r'\d{3,}', n)]
-        if valid_names:
-            fields["names"] = list(dict.fromkeys(valid_names))
+    # 2. Xoay ảnh (Deskew): Kiểm tra góc nghiêng của văn bản để xoay ảnh về 0°
+    skew_angle = 0.0
+    deskewed_color = image.copy()
+    deskewed_gray = gray.copy()
+    if deskew:
+        try:
+            detected_angle = DocumentEnhancer.detect_skew_angle(gray)
+            if abs(detected_angle) >= 0.55:
+                skew_angle = detected_angle
+                deskewed_color = DocumentEnhancer.deskew_image(image, skew_angle)
+                if len(deskewed_color.shape) == 3:
+                    deskewed_gray = cv2.cvtColor(deskewed_color, cv2.COLOR_BGR2GRAY)
+                else:
+                    deskewed_gray = deskewed_color.copy()
+        except Exception:
+            pass
 
-    # 3. Ngày sinh
-    dob = re.findall(
-        r'(?:Ngày\s*sinh(?:\s*/\s*Date\s*of\s*birth)?|Date\s*of\s*birth|Sinh\s*ngày)[:\s]*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{4})',
-        text, re.IGNORECASE
-    )
-    if dob:
-        fields["dob"] = list(dict.fromkeys(d.strip() for d in dob))
+    # 3. Tăng độ tương phản (Adaptive Thresholding)
+    if apply_adaptive_thresh:
+        try:
+            blurred = cv2.GaussianBlur(deskewed_gray, (3, 3), 0)
+            thresh_img = cv2.adaptiveThreshold(
+                blurred,
+                255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY,
+                21,
+                11
+            )
+        except Exception:
+            thresh_img = deskewed_gray
+    else:
+        thresh_img = deskewed_gray
 
-    # 4. Địa chỉ / Nơi thường trú
-    addresses = re.findall(
-        r'(?:Nơi\s*thường\s*trú(?:\s*/\s*Place\s*of\s*residence)?|Place\s*of\s*residence|Quê\s*quán(?:\s*/\s*Place\s*of\s*origin)?|Place\s*of\s*origin|Địa\s*chỉ(?:\s*trụ\s*sở)?|Address)[:\s]*([^\n\r]+)',
-        text, re.IGNORECASE
-    )
-    if addresses:
-        cleaned_addrs = [re.sub(r'^[^\w]+|[^\w]+$', '', a).strip() for a in addresses]
-        valid_addrs = [a for a in cleaned_addrs if len(a) > 5]
-        if valid_addrs:
-            fields["addresses"] = list(dict.fromkeys(valid_addrs))
-
-    # 5. Mã số thuế (MST)
-    mst = re.findall(
-        r'(?:Mã\s*số\s*thuế|MST|Tax\s*Code|M\.S\.T)[:\s]*([0-9]{10}(?:-[0-9]{3})?)',
-        text, re.IGNORECASE
-    )
-    if mst:
-        fields["mst"] = list(dict.fromkeys(m.strip() for m in mst))
-
-    # 6. Email
-    emails = re.findall(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', text)
-    if emails:
-        fields["emails"] = list(dict.fromkeys(emails))
-
-    # 7. Số điện thoại (Việt Nam)
-    phones = re.findall(r'(?:(?:\+84|0)[235789][0-9]{8})\b', text)
-    if phones:
-        fields["phones"] = list(dict.fromkeys(phones))
-
-    # 8. Ngày tháng
-    dates = re.findall(
-        r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b',
-        text
-    )
-    if dates:
-        fields["dates"] = list(dict.fromkeys(dates))
-
-    # 9. Số tiền / Tổng cộng
-    amounts = re.findall(
-        r'(?:Tổng\s*tiền(?:\s*thanh\s*toán)?|Thành\s*tiền|Cộng\s*tiền(?:\s*hàng)?|Tổng\s*cộng|Thanh\s*toán|Total)[:\s]*([0-9.,]+(?:\s*(?:VND|VNĐ|đ|đồng))?)',
-        text, re.IGNORECASE
-    )
-    if amounts:
-        fields["amounts"] = list(dict.fromkeys(a.strip() for a in amounts))
-
-    return fields
+    return deskewed_color, thresh_img, skew_angle
 
 
 def preprocess_for_ocr(
@@ -460,59 +427,35 @@ def preprocess_for_ocr(
     whiten: bool = False
 ) -> np.ndarray:
     """
-    Quy trình Tiền xử lý ảnh đầu vào toàn diện cho OCR (Full Preprocessing Pipeline):
-    1. Xoay chỉnh (Deskew): Tự động phát hiện góc nghiêng và nắn văn bản về phương ngang.
-    2. Điều chỉnh kích thước (Adaptive Upscale): Phóng to nếu ảnh quá nhỏ để nhận diện chữ li ti.
-    3. Tẩy bóng & làm sáng nền (Shadow Removal & Whitening): Khử bóng đổ không đều.
-    4. Khử nhiễu hạt (Bilateral Filter): Làm mịn hạt nhiễu cảm biến camera.
-    5. Tăng tương phản cục bộ (CLAHE): Làm rõ nét mực mờ và chữ in kim / viết tay.
+    Tiền xử lý toàn diện cho tài liệu văn bản & hóa đơn.
     """
     if image is None or image.size == 0:
         return image
 
-    processed = image.copy()
+    deskewed, _, _ = preprocess_order_image(image, deskew=deskew, apply_adaptive_thresh=False)
+    processed = deskewed.copy()
 
-    # Bước 1: Xoay nắn thẳng văn bản (Auto-Deskew)
-    if deskew:
-        try:
-            from core.enhancer import DocumentEnhancer
-            if len(processed.shape) == 3:
-                gray = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
-            else:
-                gray = processed
-            angle = DocumentEnhancer.detect_skew_angle(gray)
-            if abs(angle) >= 0.55:
-                processed = DocumentEnhancer.deskew_image(processed, angle)
-        except Exception:
-            pass
-
-    # Bước 2: Upscale nếu ảnh có kích thước quá nhỏ
     h, w = processed.shape[:2]
     max_dim = max(h, w)
     if max_dim < 1100:
         scale = 1100.0 / float(max_dim)
         processed = cv2.resize(processed, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LANCZOS4)
 
-    # Bước 3: Tẩy bóng mờ nền (nếu được yêu cầu)
+    from core.enhancer import DocumentEnhancer
     if whiten:
         try:
-            from core.enhancer import DocumentEnhancer
             processed = DocumentEnhancer.remove_shadows_and_whiten(processed, 0.35)
         except Exception:
             pass
 
-    # Bước 4: Khử nhiễu hạt cảm biến giữ sắc nét cạnh chữ
     if denoise:
         try:
-            from core.enhancer import DocumentEnhancer
             processed = DocumentEnhancer.reduce_noise(processed, 0.15)
         except Exception:
             pass
 
-    # Bước 5: Tăng cường tương phản chữ / nền (CLAHE)
     if enhance_contrast:
         try:
-            from core.enhancer import DocumentEnhancer
             processed = DocumentEnhancer.enhance_contrast(processed, 0.25)
         except Exception:
             pass
@@ -520,22 +463,480 @@ def preprocess_for_ocr(
     return processed
 
 
+# ---------------------------------------------------------------------------
+# BƯỚC 2: ĐỊNH VỊ VÙNG CHỮ VỚI PADDLEOCR DBNET (TEXT DETECTION)
+# ---------------------------------------------------------------------------
+
+class PaddleOCRDetector:
+    """
+    Bước 2: Định vị vùng chữ với thuật toán PaddleOCR DBNet (Detection Only).
+    Chạy qua ONNXRuntime engine với mô hình PP-OCRv4 detection mới nhất.
+    Cung cấp giao diện tương thích chuẩn:
+        det_model = PaddleOCR(use_angle_cls=True, lang='vi', det=True, rec=False)
+        results = det_model.ocr(img, cls=True)
+    """
+
+    _instance: Optional["PaddleOCRDetector"] = None
+
+    def __init__(
+        self,
+        use_angle_cls: bool = True,
+        lang: str = "vi",
+        det: bool = True,
+        rec: bool = False,
+        **kwargs
+    ):
+        self.use_angle_cls = use_angle_cls
+        self.lang = lang
+        self.det = det
+        self.rec = rec
+        self._rapid_ocr = None
+        self._init_detector()
+
+    @classmethod
+    def get_instance(cls) -> "PaddleOCRDetector":
+        if cls._instance is None:
+            cls._instance = PaddleOCRDetector(use_angle_cls=True, lang="vi", det=True, rec=False)
+        return cls._instance
+
+    def _init_detector(self):
+        if self._rapid_ocr is not None:
+            return
+
+        from rapidocr_onnxruntime import RapidOCR
+
+        base_dir = get_base_dir()
+        candidate_models = [
+            os.path.join(base_dir, "weights", "ch_PP-OCRv4_det_infer.onnx"),
+            os.path.join(base_dir, "core", "models", "ch_PP-OCRv4_det_infer.onnx"),
+        ]
+
+        init_kwargs = {
+            "Det_unclip_ratio": 1.85,
+            "Det_thresh": 0.20,
+            "Det_box_thresh": 0.35,
+            "Det_limit_side_len": 1536,
+            "Global_use_angle_cls": self.use_angle_cls,
+        }
+
+        for model_path in candidate_models:
+            if os.path.exists(model_path):
+                init_kwargs["Det_model_path"] = model_path
+                break
+
+        self._rapid_ocr = RapidOCR(**init_kwargs)
+
+    def detect(self, image: np.ndarray) -> List[List[List[float]]]:
+        """
+        Phát hiện vùng chữ bằng DBNet.
+        Trả về danh sách các polygon 4 tọa độ góc: [[[x1, y1], [x2, y2], [x3, y3], [x4, y4]], ...]
+        """
+        if image is None or image.size == 0:
+            return []
+
+        self._init_detector()
+
+        try:
+            dt_boxes, _ = self._rapid_ocr.text_detector(image)
+        except Exception:
+            dt_boxes = None
+
+        if dt_boxes is None or len(dt_boxes) == 0:
+            return []
+
+        boxes_list = []
+        for box in dt_boxes:
+            pts = [[float(pt[0]), float(pt[1])] for pt in box]
+            boxes_list.append(pts)
+
+        return boxes_list
+
+    def ocr(self, img_path_or_array, det: bool = True, rec: bool = False, cls: bool = True):
+        """
+        Giao diện mô phỏng chuẩn của PaddleOCR Python:
+        det_model.ocr(img_path, cls=True)
+        Khi det=True, rec=False -> Trả về danh sách các tọa độ góc [x, y] của từng dòng chữ.
+        """
+        if isinstance(img_path_or_array, str):
+            image = cv2.imread(img_path_or_array)
+        else:
+            image = img_path_or_array
+
+        if image is None or image.size == 0:
+            return []
+
+        boxes = self.detect(image)
+        return [boxes] if boxes else []
+
+
+PaddleOCR = PaddleOCRDetector
+
+
+def crop_text_box(image: np.ndarray, polygon: List[List[float]], padding: int = 3) -> Optional[np.ndarray]:
+    """
+    Cắt ảnh (Crop): Dựa vào tọa độ 4 góc, cắt đoạn ảnh nhỏ chứa duy nhất một dòng/ô chữ.
+    Sử dụng phép biến đổi phối cảnh (Perspective Transform) để nắn thẳng các dòng chữ xiên xẹo.
+    """
+    if image is None or image.size == 0 or len(polygon) != 4:
+        return None
+
+    pts = np.array(polygon, dtype=np.float32)
+
+    w_top = np.linalg.norm(pts[1] - pts[0])
+    w_bot = np.linalg.norm(pts[2] - pts[3])
+    max_w = int(max(w_top, w_bot)) + (padding * 2)
+
+    h_left = np.linalg.norm(pts[3] - pts[0])
+    h_right = np.linalg.norm(pts[2] - pts[1])
+    max_h = int(max(h_left, h_right)) + (padding * 2)
+
+    if max_w < 5 or max_h < 5:
+        return None
+
+    dst_pts = np.array([
+        [padding, padding],
+        [max_w - 1 - padding, padding],
+        [max_w - 1 - padding, max_h - 1 - padding],
+        [padding, max_h - 1 - padding]
+    ], dtype=np.float32)
+
+    try:
+        matrix = cv2.getPerspectiveTransform(pts, dst_pts)
+        cropped = cv2.warpPerspective(
+            image,
+            matrix,
+            (max_w, max_h),
+            flags=cv2.INTER_CUBIC,
+            borderMode=cv2.BORDER_REPLICATE
+        )
+        return cropped
+    except Exception:
+        xs = [p[0] for p in polygon]
+        ys = [p[1] for p in polygon]
+        x_min = max(0, int(min(xs)) - padding)
+        y_min = max(0, int(min(ys)) - padding)
+        x_max = min(image.shape[1], int(max(xs)) + padding)
+        y_max = min(image.shape[0], int(max(ys)) + padding)
+        if x_max > x_min and y_max > y_min:
+            return image[y_min:y_max, x_min:x_max]
+        return None
+
+
+# ---------------------------------------------------------------------------
+# BƯỚC 3: NHẬN DIỆN CHỮ TIẾNG VIỆT BẰNG VIETOCR (TEXT RECOGNITION)
+# ---------------------------------------------------------------------------
+
+class VietOCREngine:
+    """
+    Bước 3: Nhận diện chữ tiếng Việt bằng VietOCR (Text Recognition).
+    Mô hình: vgg_transformer.
+    Được huấn luyện chuẩn cho tiếng Việt và chữ viết tay.
+    Chạy 100% Offline với bộ trọng số tải sẵn tại ./weights/vgg_transformer.pth.
+    """
+
+    _instance: Optional["VietOCREngine"] = None
+
+    def __init__(self, model_name: str = "vgg_transformer"):
+        self.model_name = model_name
+        self.predictor = None
+        self._init_predictor()
+
+    @classmethod
+    def get_instance(cls) -> "VietOCREngine":
+        if cls._instance is None:
+            cls._instance = VietOCREngine()
+        return cls._instance
+
+    def _init_predictor(self):
+        if self.predictor is not None:
+            return
+
+        import torch
+        from vietocr.tool.config import Cfg
+        from vietocr.tool.predictor import Predictor
+
+        base_dir = get_base_dir()
+        candidate_weights = [
+            os.path.join(base_dir, "weights", f"{self.model_name}.pth"),
+            os.path.join(".", "weights", f"{self.model_name}.pth"),
+            os.path.join(base_dir, "core", "models", f"{self.model_name}.pth"),
+        ]
+
+        weights_path = None
+        for path in candidate_weights:
+            if os.path.exists(path) and os.path.getsize(path) > 10_000_000:
+                weights_path = path
+                break
+
+        config = Cfg.load_config_from_name(self.model_name)
+        if weights_path:
+            config['weights'] = weights_path
+        config['cnn']['pretrained'] = False
+        config['device'] = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+
+        if 'predictor' in config and isinstance(config['predictor'], dict):
+            config['predictor']['beamsearch'] = False
+
+        self.predictor = Predictor(config)
+
+    def predict_image(self, image: np.ndarray) -> str:
+        """Nhận diện văn bản cho một ảnh cắt dòng đơn lẻ."""
+        if image is None or image.size == 0:
+            return ""
+
+        self._init_predictor()
+
+        if len(image.shape) == 3:
+            rgb_img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        else:
+            rgb_img = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+
+        pil_img = Image.fromarray(rgb_img)
+        try:
+            text = self.predictor.predict(pil_img)
+            return (text or "").strip()
+        except Exception:
+            return ""
+
+
+# ---------------------------------------------------------------------------
+# BƯỚC 4: HẬU XỬ LÝ DỮ LIỆU & BÓC TÁCH CẤU TRÚC (POST-PROCESSING & STRUCTURING)
+# ---------------------------------------------------------------------------
+
+def extract_structured_fields(
+    text: str,
+    boxes: Optional[List[OCRBox]] = None,
+    img_shape: Optional[Tuple[int, int]] = None
+) -> Dict[str, Any]:
+    """
+    Bước 4: Hậu xử lý dữ liệu (Post-processing & Structuring) cho đơn hàng & văn bản:
+    1. Sử dụng vị trí hình học (Spatial Heuristic)
+    2. Sử dụng biểu thức chính quy (Regex)
+    3. Sử dụng từ điển 63 tỉnh thành Việt Nam (Dictionary Matching)
+    """
+    fields: Dict[str, Any] = {
+        "customer_name": [],
+        "phones": [],
+        "addresses": [],
+        "provinces": [],
+        "products": [],
+        "amounts": [],
+        "dates": [],
+        "cccd": [],
+        "mst": [],
+        "emails": [],
+    }
+
+    # 1. Tên khách hàng / Người nhận / Người mua
+    names = re.findall(
+        r'(?:Họ\s*và\s*tên|Tên\s*khách\s*hàng|Người\s*nhận|Người\s*mua\s*hàng|Người\s*liên\s*hệ|Khách\s*hàng)[:\s]*([^\n\r,;]{2,45})',
+        text, re.IGNORECASE
+    )
+    if names:
+        cleaned_names = [re.sub(r'^[^\w]+|[^\w]+$', '', n).strip() for n in names]
+        valid_names = [n for n in cleaned_names if len(n) > 2 and not any(c.isdigit() for c in n)]
+        if valid_names:
+            fields["customer_name"] = list(dict.fromkeys(valid_names))
+            fields["names"] = fields["customer_name"]
+
+    # 2. Biểu thức chính quy: Số điện thoại (10 chữ số bắt đầu bằng 0, hoặc +84)
+    phones = re.findall(r'(?:(?:\+84|0)[235789][0-9]{8})\b', text)
+    if phones:
+        fields["phones"] = list(dict.fromkeys(phones))
+
+    # 2. Biểu thức chính quy: Mã số thuế & CCCD
+    mst = re.findall(r'(?:Mã\s*số\s*thuế|MST|Tax\s*Code)[:\s]*([0-9]{10}(?:-[0-9]{3})?)', text, re.IGNORECASE)
+    if mst:
+        fields["mst"] = list(dict.fromkeys(m.strip() for m in mst))
+
+    cccd = re.findall(r'(?:CCCD|CMND|Số\s*CCCD|Số\s*CMND)[:\s]*([0-9]{9,12})\b', text, re.IGNORECASE)
+    if cccd:
+        fields["cccd"] = list(dict.fromkeys(c.strip() for c in cccd))
+    else:
+        twelve_digits = re.findall(r'\b0[0-9]{11}\b', text)
+        if twelve_digits:
+            fields["cccd"] = list(dict.fromkeys(twelve_digits))
+
+    # 3. Biểu thức chính quy: Email
+    emails = re.findall(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', text)
+    if emails:
+        fields["emails"] = list(dict.fromkeys(emails))
+
+    # 4. Biểu thức chính quy: Ngày tháng
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b', text)
+    if dates:
+        fields["dates"] = list(dict.fromkeys(dates))
+
+    # 5. Biểu thức chính quy: Số tiền / Tổng cộng / COD
+    amounts = re.findall(
+        r'(?:Tổng\s*tiền(?:\s*thanh\s*toán)?|Thành\s*tiền|Cộng\s*tiền(?:\s*hàng)?|Tổng\s*cộng|Thanh\s*toán|Tiền\s*thu|COD|Giá)[:\s]*([0-9.,]+(?:\s*(?:k|VND|VNĐ|đ|đồng))?)',
+        text, re.IGNORECASE
+    )
+    if amounts:
+        fields["amounts"] = list(dict.fromkeys(a.strip() for a in amounts))
+
+    # 6. Địa chỉ & Từ điển 63 Tỉnh thành (Dictionary Matching)
+    addresses = re.findall(
+        r'(?:Nơi\s*thường\s*trú|Địa\s*chỉ(?:\s*nhận\s*hàng)?|Nơi\s*giao|Address|Đ\/C)[:\s]*([^\n\r]+)',
+        text, re.IGNORECASE
+    )
+    extracted_addrs = [re.sub(r'^[^\w]+|[^\w]+$', '', a).strip() for a in addresses if len(a.strip()) > 5]
+
+    matched_provinces = []
+    standardized_addrs = []
+
+    lines = text.splitlines()
+    for ln in lines:
+        prov, fixed = match_and_standardize_province(ln)
+        if prov and prov not in matched_provinces:
+            matched_provinces.append(prov)
+        if any(keyword in ln.lower() for keyword in ("địa chỉ", "đ/c", "dia chi", "phường", "xã", "quận", "huyện", "thị trấn", "đường")):
+            standardized_addrs.append(fixed)
+
+    for addr in extracted_addrs:
+        prov, fixed = match_and_standardize_province(addr)
+        if prov and prov not in matched_provinces:
+            matched_provinces.append(prov)
+        if fixed not in standardized_addrs:
+            standardized_addrs.append(fixed)
+
+    if standardized_addrs:
+        fields["addresses"] = list(dict.fromkeys(standardized_addrs))
+    if matched_provinces:
+        fields["provinces"] = matched_provinces
+
+    # 7. Vị trí hình học (Spatial Heuristics) nếu có bounding boxes
+    if boxes and img_shape and img_shape[0] > 0 and img_shape[1] > 0:
+        img_h, img_w = img_shape[:2]
+
+        top_lines = []
+        middle_lines = []
+        bottom_lines = []
+
+        for b in boxes:
+            y_mid = b.bbox[1] + (b.bbox[3] / 2.0)
+            y_rel = y_mid / float(img_h)
+
+            if y_rel < 0.35:
+                top_lines.append(b)
+            elif y_rel > 0.70:
+                bottom_lines.append(b)
+            else:
+                middle_lines.append(b)
+
+        # Vị trí góc trên: Tên người nhận / Khách hàng
+        for b in top_lines:
+            t = b.text.strip()
+            m_name = re.search(r'(?:Họ\s*và\s*tên|Tên\s*khách\s*hàng|Người\s*nhận|Người\s*mua)[:\s]*([^\n\r,;]{2,40})', t, re.IGNORECASE)
+            if m_name:
+                name_val = m_name.group(1).strip()
+                if len(name_val) > 2 and not any(c.isdigit() for c in name_val):
+                    fields["customer_name"].append(name_val)
+            elif 2 <= len(t.split()) <= 4 and t.istitle() and not any(c.isdigit() for c in t):
+                if not any(k in t.lower() for k in ("đơn hàng", "phiếu", "hóa đơn", "cửa hàng", "shop", "ngày")):
+                    fields["customer_name"].append(t)
+
+        # Vị trí giữa trang: Các dòng trong bảng đơn hàng (Tên sản phẩm, Số lượng, Đơn giá)
+        for b in middle_lines:
+            t = b.text.strip()
+            m_prod = re.search(r'([A-Za-z0-9\sàáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđĐ_-]{3,35})\s*(?:x|SL|Số\s*lượng)?\s*[:\s]*(\d+)\s*[:\s]*([0-9.,]+\s*(?:k|đ|vnd|vnđ)?)', t, re.IGNORECASE)
+            if m_prod:
+                fields["products"].append({
+                    "name": m_prod.group(1).strip(),
+                    "quantity": m_prod.group(2).strip(),
+                    "price": m_prod.group(3).strip(),
+                })
+            elif any(k in t.lower() for k in ("áo", "quần", "váy", "giày", "dép", "kem", "sách", "nạp mực", "máy in", "hộp", "bộ", "combo")):
+                fields["products"].append({"name": t, "raw": t})
+
+        # Vị trí góc dưới: Tổng tiền thanh toán
+        for b in bottom_lines:
+            t = b.text.strip()
+            m_tot = re.search(r'(?:Tổng|Thành\s*tiền|Thanh\s*toán|Tiền\s*thu|COD)[:\s]*([0-9.,]+\s*(?:k|VND|VNĐ|đ|đồng)?)', t, re.IGNORECASE)
+            if m_tot and m_tot.group(1).strip() not in fields["amounts"]:
+                fields["amounts"].insert(0, m_tot.group(1).strip())
+
+    if fields["customer_name"]:
+        fields["customer_name"] = list(dict.fromkeys(fields["customer_name"]))
+
+    return fields
+
+
+def format_structured_order_summary(fields: Dict[str, Any]) -> str:
+    """Tạo bảng tóm tắt thông tin bóc tách cấu trúc của đơn hàng."""
+    if not fields:
+        return ""
+
+    has_data = any(fields.get(k) for k in ("customer_name", "phones", "addresses", "provinces", "products", "amounts"))
+    if not has_data:
+        return ""
+
+    lines = []
+    lines.append("=" * 55)
+    lines.append("📋 KẾT QUẢ BÓC TÁCH CẤU TRÚC ĐƠN HÀNG (OFFLINE AI)")
+    lines.append("=" * 55)
+
+    if fields.get("customer_name"):
+        lines.append(f"👤 Khách hàng: {', '.join(fields['customer_name'])}")
+
+    if fields.get("phones"):
+        lines.append(f"📞 Số điện thoại: {', '.join(fields['phones'])}")
+
+    if fields.get("addresses"):
+        lines.append(f"🏠 Địa chỉ: {', '.join(fields['addresses'])}")
+
+    if fields.get("provinces"):
+        lines.append(f"📍 Tỉnh / Thành phố: {', '.join(fields['provinces'])}")
+
+    if fields.get("products"):
+        lines.append("📦 Sản phẩm / Hàng hóa:")
+        for p in fields["products"]:
+            if isinstance(p, dict) and "quantity" in p and "price" in p:
+                lines.append(f"   • {p['name']} | SL: {p['quantity']} | Giá: {p['price']}")
+            elif isinstance(p, dict) and "name" in p:
+                lines.append(f"   • {p['name']}")
+            else:
+                lines.append(f"   • {str(p)}")
+
+    if fields.get("amounts"):
+        lines.append(f"💰 Tổng tiền thanh toán: {fields['amounts'][0]}")
+
+    if fields.get("dates"):
+        lines.append(f"🗓️ Ngày tháng: {', '.join(fields['dates'])}")
+
+    if fields.get("mst"):
+        lines.append(f"🏢 Mã số thuế (MST): {', '.join(fields['mst'])}")
+
+    if fields.get("cccd"):
+        lines.append(f"🪪 CCCD/CMND: {', '.join(fields['cccd'])}")
+
+    lines.append("=" * 55)
+    lines.append("")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# HỆ THỐNG ĐIỀU PHỐI OCR CHÍNH (OCR ENGINE)
+# ---------------------------------------------------------------------------
+
 class OCREngine:
     """
-    Hệ thống nhận diện OCR tinh gọn với 2 chế độ chính (Online / Offline)
-    và hỗ trợ thử nghiệm mô hình Vision-Language Qwen-3 cục bộ:
-    1. 'online': Google Gemini Vision AI (độ chính xác 100% chữ viết tay, bảng biểu, tài liệu).
-    2. 'offline': Kiến trúc PaddleOCR (Baidu DBNet Det + Angle Cls + CTC Rec) + Smart AI tiếng Việt.
-    3. 'qwen': Thử nghiệm mô hình Qwen-3 / Qwen-VL local (kết nối qua Ollama hoặc local endpoint).
+    Hệ thống nhận diện OCR tinh gọn với 2 chế độ:
+    1. 'offline': Quy trình 4 bước tối ưu cho tài liệu & đơn hàng viết tay tiếng Việt:
+       - Bước 1: Tiền xử lý Deskew (0°), Grayscale, Adaptive Thresholding & CLAHE.
+       - Bước 2: Định vị vùng chữ với PaddleOCR DBNet (PP-OCRv4 ONNX) & Cắt ảnh (Crop).
+       - Bước 3: Nhận diện chữ tiếng Việt bằng VietOCR (vgg_transformer).
+       - Bước 4: Hậu xử lý bóc tách cấu trúc (Spatial Heuristic, Regex số điện thoại, Từ điển 63 tỉnh thành).
+    2. 'online': Google Gemini Cloud Vision AI (dự phòng đa tầng đám mây).
     """
 
     _instance: Optional["OCREngine"] = None
 
     def __init__(self):
-        self._paddle_ocr = None
+        self._detector: Optional[PaddleOCRDetector] = None
+        self._vietocr: Optional[VietOCREngine] = None
         self._restorer: Optional[SmartVietnameseRestorer] = None
-        self._engine_mode: str = "offline"  # 'online' or 'offline'
-        self.ollama_endpoint: str = "http://localhost:11434"
+        self._engine_mode: str = "offline"
 
     @classmethod
     def get_instance(cls) -> "OCREngine":
@@ -552,42 +953,22 @@ class OCREngine:
         mode_lower = mode.lower().strip()
         if mode_lower in ("online", "gemini"):
             self._engine_mode = "online"
-        elif mode_lower in ("qwen", "qwen3", "qwen_local"):
-            self._engine_mode = "qwen"
         else:
             self._engine_mode = "offline"
+
+    def _init_detector(self):
+        if self._detector is None:
+            self._detector = PaddleOCRDetector.get_instance()
+
+    def _init_vietocr(self):
+        if self._vietocr is None:
+            self._vietocr = VietOCREngine.get_instance()
 
     def _init_restorer(self):
         if self._restorer is None:
             base_dir = get_base_dir()
             dict_path = os.path.join(base_dir, "core", "models", "viet_words.txt")
             self._restorer = SmartVietnameseRestorer(dict_path)
-
-    def _init_paddle_ocr(self):
-        """Khởi tạo kiến trúc PaddleOCR (DBNet Det + Angle Cls + CTC Rec) tối ưu cho tiếng Việt."""
-        if self._paddle_ocr is None:
-            from rapidocr_onnxruntime import RapidOCR
-
-            base_dir = get_base_dir()
-            local_det_model = os.path.join(base_dir, "core", "models", "ch_PP-OCRv3_det_infer.onnx")
-
-            # Cấu hình kiến trúc PaddleOCR chuẩn:
-            # - Det_unclip_ratio: 1.85 (mở rộng vùng nhận diện để không cắt dấu tiếng Việt: hỏi, ngã, nặng, sắc, huyền)
-            # - Det_thresh: 0.20 (nhạy bén với nét chữ mảnh, chữ viết tay)
-            # - Det_box_thresh: 0.35 (bắt trọn số liệu nhỏ trong bảng biểu)
-            # - Det_limit_side_len: 1536 (độ phân giải cao cho DBNet)
-            # - Global_use_angle_cls: True (phát hiện và tự xoay hướng 0, 90, 180, 270 độ)
-            init_kwargs = {
-                "Det_unclip_ratio": 1.85,
-                "Det_thresh": 0.20,
-                "Det_box_thresh": 0.35,
-                "Det_limit_side_len": 1536,
-                "Global_use_angle_cls": True,
-            }
-            if os.path.exists(local_det_model):
-                init_kwargs["Det_model_path"] = local_det_model
-
-            self._paddle_ocr = RapidOCR(**init_kwargs)
 
     def recognize(
         self,
@@ -597,9 +978,8 @@ class OCREngine:
     ) -> OCRResult:
         """
         Nhận diện văn bản trong ảnh:
-        - 'online': Google Gemini Cloud Vision AI
-        - 'offline': PaddleOCR Kiến trúc DBNet + Phục hồi dấu tiếng Việt thông minh
-        - 'qwen': Thử nghiệm Qwen-3 / Vision LM Local qua Ollama (tự động fallback về PaddleOCR nếu Ollama tắt)
+        - 'online': Google Gemini Cloud Vision AI.
+        - 'offline': PaddleOCR DBNet + VietOCR + Hậu xử lý cấu trúc.
         """
         if image is None or image.size == 0:
             return OCRResult(error="Ảnh rỗng hoặc không hợp lệ")
@@ -610,8 +990,6 @@ class OCREngine:
         try:
             if active_mode in ("online", "gemini"):
                 return self._recognize_online(image, start_time, progress_callback=progress_callback)
-            elif active_mode in ("qwen", "qwen3", "qwen_local"):
-                return self._recognize_qwen_with_fallback(image, start_time, progress_callback=progress_callback)
             else:
                 return self._recognize_offline(image, start_time, progress_callback=progress_callback)
         except Exception as e:
@@ -624,16 +1002,13 @@ class OCREngine:
         api_key: Optional[str] = None,
         progress_callback: Optional[Callable[[int, int, str], None]] = None
     ) -> OCRResult:
-        """
-        Chế độ Online: Multimodal Cloud Vision OCR qua Google Gemini AI.
-        Đạt chuẩn 100% chữ viết tay phức tạp, phiếu thu, hóa đơn, bảng biểu.
-        """
+        """Chế độ Online: Multimodal Cloud Vision OCR qua Google Gemini AI."""
         from core.config_manager import ConfigManager
         cfg = ConfigManager.get_instance()
         key = (api_key or cfg.get_gemini_api_key()).strip()
         if not key:
             return OCRResult(
-                error="Chưa nhập Google Gemini API Key. Vui lòng nhập API Key tại khung bên dưới hoặc lấy Key miễn phí tại Google AI Studio."
+                error="Chưa nhập Google Gemini API Key. Vui lòng nhập API Key hoặc lấy Key miễn phí tại Google AI Studio."
             )
 
         if progress_callback:
@@ -645,7 +1020,6 @@ class OCREngine:
 
             client = genai.Client(api_key=key)
 
-            # High quality JPEG encoding
             success, buf = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
             if not success:
                 return OCRResult(error="Không thể nén ảnh để gửi tới Gemini AI.")
@@ -655,20 +1029,19 @@ class OCREngine:
             prompt = (
                 "Bạn là chuyên gia trích xuất tài liệu OCR tiếng Việt cao cấp.\n"
                 "Nhiệm vụ của bạn là đọc và trích xuất TOÀN BỘ nội dung có trong bức ảnh tài liệu này, "
-                "bao gồm cả chữ in, chữ viết tay, bảng biểu, số tiền, ngày tháng, mã số thuế, địa chỉ, email, website.\n\n"
+                "bao gồm cả chữ in, chữ viết tay, bảng biểu, số tiền, ngày tháng, mã số thuế, địa chỉ, email.\n\n"
                 "Quy tắc bắt buộc:\n"
-                "1. Đọc chính xác 100% chữ viết tay tiếng Việt có dấu (kể cả chữ viết ngoáy bằng bút bi, bút mực).\n"
+                "1. Đọc chính xác 100% chữ viết tay tiếng Việt có dấu.\n"
                 "2. Giữ nguyên cấu trúc các dòng trong bảng biểu và thông tin tiền tệ.\n"
-                "3. Bảo toàn nguyên vẹn mọi đường link, địa chỉ email, mã số thuế, số điện thoại.\n"
-                "4. Chỉ trả về nội dung văn bản trích xuất sạch sẽ, trung thực, không thêm lời chào, bình luận hay giải thích mở đầu/kết thúc."
+                "3. Bảo toàn nguyên vẹn mọi số điện thoại, địa chỉ, mã số thuế.\n"
+                "4. Chỉ trả về nội dung văn bản trích xuất sạch sẽ, trung thực, không thêm lời giải thích mở đầu/kết thúc."
             )
 
             models_to_try = [
                 cfg.get_gemini_model(),
-                "gemini-3.6-flash",
-                "gemini-3.5-flash",
+                "gemini-2.5-flash",
+                "gemini-2.0-flash",
                 "gemini-flash-latest",
-                "gemini-3-flash-preview",
             ]
             seen = set()
             model_queue = [m for m in models_to_try if m and not (m in seen or seen.add(m))]
@@ -716,17 +1089,20 @@ class OCREngine:
                     ))
 
             total_time = round(time.time() - start_time, 2)
-            extracted_fields = extract_structured_fields(extracted_text)
+            extracted_fields = extract_structured_fields(extracted_text, boxes=boxes, img_shape=(h, w))
+
+            summary_header = format_structured_order_summary(extracted_fields)
+            final_display_text = f"{summary_header}{extracted_text}" if summary_header else extracted_text
 
             if progress_callback:
                 progress_callback(10, 10, "Hoàn tất nhận diện!")
 
             return OCRResult(
-                full_text=extracted_text,
+                full_text=final_display_text,
                 boxes=boxes,
                 elapse_time=total_time,
-                char_count=len(extracted_text),
-                word_count=len(extracted_text.split()),
+                char_count=len(final_display_text),
+                word_count=len(final_display_text.split()),
                 extracted_fields=extracted_fields
             )
 
@@ -746,184 +1122,121 @@ class OCREngine:
         progress_callback: Optional[Callable[[int, int, str], None]] = None
     ) -> OCRResult:
         """
-        Chế độ Offline:
-        1. Tiền xử lý ảnh (Preprocessing): Auto-Deskew, Denoise, CLAHE Contrast, Upscale.
-        2. Kiến trúc PaddleOCR:
-           - Phát hiện vùng chữ (DBNet Detection) với unclip_ratio=1.85 bắt trọn dấu tiếng Việt.
-           - Phân loại hướng xoay (Direction Angle Classifier) 0/90/180/270 độ.
-           - Nhận diện ký tự (CTC Recognition) siêu tốc 1.5s - 2.5s.
-        3. Phục hồi dấu tiếng Việt thông minh (SmartVietnameseRestorer) với 74.000 từ + 60+ quy tắc.
-        4. Hậu xử lý trích xuất trường thông tin cấu trúc (Regex).
+        Quy trình Offline toàn diện 4 Bước:
+        - Bước 1: Tiền xử lý ảnh (Pre-processing): Grayscale, Deskew (0°), Adaptive Thresholding & CLAHE.
+        - Bước 2: Định vị vùng chữ với PaddleOCR DBNet (PP-OCRv4 Det) & Cắt ảnh (Crop).
+        - Bước 3: Nhận diện chữ tiếng Việt bằng VietOCR (vgg_transformer).
+        - Bước 4: Hậu xử lý dữ liệu (Spatial Heuristic, Regex số điện thoại, Dictionary Matching 63 tỉnh thành).
         """
-        self._init_paddle_ocr()
+        self._init_detector()
+        self._init_vietocr()
         self._init_restorer()
 
+        # BƯỚC 1: TIỀN XỬ LÝ ẢNH
         if progress_callback:
-            progress_callback(1, 10, "Đang tiền xử lý ảnh (Deskew, Khử nhiễu, Tăng tương phản)...")
+            progress_callback(1, 10, "Bước 1: Tiền xử lý ảnh (Deskew 0°, Grayscale, Tăng tương phản)...")
 
-        # Bước 1: Tiền xử lý ảnh chuyên sâu
-        prep_img = preprocess_for_ocr(image, deskew=True, denoise=True, enhance_contrast=True)
+        deskewed_color, thresh_img, skew_angle = preprocess_order_image(
+            image,
+            deskew=True,
+            apply_adaptive_thresh=True
+        )
+        prep_img = preprocess_for_ocr(deskewed_color, deskew=False, denoise=True, enhance_contrast=True)
 
+        # BƯỚC 2: ĐỊNH VỊ VÙNG CHỮ VỚI PADDLEOCR DBNET
         if progress_callback:
-            progress_callback(3, 10, "Đang quét văn bản bằng kiến trúc PaddleOCR (DBNet + Cls)...")
+            progress_callback(3, 10, "Bước 2: Định vị vùng chữ bằng PaddleOCR DBNet (PP-OCRv4)...")
 
-        raw_result, _ = self._paddle_ocr(prep_img)
+        polygons = self._detector.detect(prep_img)
+        if not polygons and deskewed_color is not prep_img:
+            polygons = self._detector.detect(deskewed_color)
 
-        # Dự phòng: Nếu ảnh đã tiền xử lý không bắt được chữ, quét lại trên ảnh gốc
-        if not raw_result and prep_img is not image:
-            raw_result, _ = self._paddle_ocr(image)
+        if not polygons:
+            return OCRResult(
+                full_text="Không tìm thấy văn bản trong tài liệu.",
+                boxes=[],
+                elapse_time=round(time.time() - start_time, 2)
+            )
 
-        if not raw_result:
-            return OCRResult(full_text="", boxes=[], elapse_time=round(time.time() - start_time, 3))
+        # Cắt ảnh (Crop): Lấy tọa độ bounding boxes và cắt ảnh đơn hàng thành các ảnh nhỏ
+        cropped_items: List[Tuple[np.ndarray, Tuple[float, float, float, float], List[List[float]]]] = []
+        for poly in polygons:
+            xs = [p[0] for p in poly]
+            ys = [p[1] for p in poly]
+            bbox = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
 
+            crop = crop_text_box(deskewed_color, poly, padding=3)
+            if crop is not None and crop.size > 0:
+                cropped_items.append((crop, bbox, poly))
+
+        # Sắp xếp các đoạn ảnh theo thứ tự đọc tự nhiên từ trên xuống dưới, trái qua phải
+        cropped_items.sort(key=lambda item: (item[1][1], item[1][0]))
+
+        # BƯỚC 3: NHẬN DIỆN CHỮ TIẾNG VIỆT BẰNG VIETOCR
+        total_crops = len(cropped_items)
         boxes: List[OCRBox] = []
 
-        if progress_callback:
-            progress_callback(7, 10, "Đang phục hồi dấu tiếng Việt & hậu xử lý chính tả...")
+        for idx, (crop, bbox, poly) in enumerate(cropped_items):
+            if progress_callback and total_crops > 0:
+                step_pct = 4 + int((idx / total_crops) * 4)
+                progress_callback(step_pct, 10, f"Bước 3: VietOCR đang nhận diện tiếng Việt ({idx + 1}/{total_crops} dòng)...")
 
-        for item in raw_result:
-            if len(item) >= 3:
-                poly = [[float(p[0]), float(p[1])] for p in item[0]]
-                raw_txt = str(item[1]).strip()
-                try:
-                    conf = float(item[2])
-                except (ValueError, TypeError):
-                    conf = 0.0
+            text = self._vietocr.predict_image(crop)
+            if text:
+                text = unicodedata.normalize("NFC", text.strip())
+                text = self._restorer.restore_line(text)
 
-                xs = [p[0] for p in poly]
-                ys = [p[1] for p in poly]
-                bbox = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+                boxes.append(OCRBox(
+                    polygon=poly,
+                    bbox=bbox,
+                    text=text,
+                    confidence=0.95
+                ))
 
-                # Áp dụng phục hồi dấu và sửa lỗi chính tả quang học
-                restored_text = self._restorer.restore_line(raw_txt)
-
-                if restored_text:
-                    boxes.append(OCRBox(
-                        polygon=poly,
-                        bbox=bbox,
-                        text=restored_text,
-                        confidence=conf
-                    ))
+        if not boxes:
+            return OCRResult(
+                full_text="",
+                boxes=[],
+                elapse_time=round(time.time() - start_time, 2)
+            )
 
         sorted_boxes = self._sort_reading_order(boxes)
-        lines = self._reconstruct_lines(sorted_boxes)
-        full_text = "\n".join(lines)
-        total_time = round(time.time() - start_time, 3)
+        reconstructed_lines = self._reconstruct_lines(sorted_boxes)
+        raw_full_text = "\n".join(reconstructed_lines).strip()
 
-        # Bước 4: Hậu xử lý trích xuất cấu trúc
-        extracted_fields = extract_structured_fields(full_text)
+        # BƯỚC 4: HẬU XỬ LÝ DỮ LIỆU & BÓC TÁCH CẤU TRÚC
+        if progress_callback:
+            progress_callback(9, 10, "Bước 4: Hậu xử lý dữ liệu (Spatial Heuristic, Regex SĐT, Từ điển 63 tỉnh thành)...")
+
+        img_h, img_w = deskewed_color.shape[:2]
+        extracted_fields = extract_structured_fields(
+            raw_full_text,
+            boxes=sorted_boxes,
+            img_shape=(img_h, img_w)
+        )
+
+        summary_header = format_structured_order_summary(extracted_fields)
+        if summary_header:
+            final_full_text = f"{summary_header}\n--- NỘI DUNG VĂN BẢN CHI TIẾT ---\n{raw_full_text}"
+        else:
+            final_full_text = raw_full_text
+
+        total_time = round(time.time() - start_time, 2)
 
         if progress_callback:
-            progress_callback(10, 10, "Hoàn tất nhận diện!")
+            progress_callback(10, 10, "Hoàn tất nhận diện đơn hàng thành công!")
 
         return OCRResult(
-            full_text=full_text,
+            full_text=final_full_text,
             boxes=sorted_boxes,
             elapse_time=total_time,
-            char_count=len(full_text),
-            word_count=len(full_text.split()),
+            char_count=len(final_full_text),
+            word_count=len(final_full_text.split()),
             extracted_fields=extracted_fields
         )
 
-    def _recognize_qwen_with_fallback(
-        self,
-        image: np.ndarray,
-        start_time: float,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None
-    ) -> OCRResult:
-        """
-        Thử nghiệm mô hình Qwen-3 / Vision-Language Model cục bộ (Local VLM).
-        Nếu Ollama hoặc endpoint local không khả dụng, tự động chuyển về PaddleOCR Offline.
-        """
-        import base64
-        import json
-        import urllib.request
-
-        if progress_callback:
-            progress_callback(2, 10, "Đang kiểm tra kết nối tới mô hình Qwen-3 Local (Ollama)...")
-
-        # Ping kiểm tra Ollama nhanh trong 0.8s
-        ollama_active = False
-        try:
-            req = urllib.request.Request(f"{self.ollama_endpoint.rstrip('/')}/api/tags")
-            with urllib.request.urlopen(req, timeout=0.8) as resp:
-                if resp.status == 200:
-                    ollama_active = True
-        except Exception:
-            ollama_active = False
-
-        if not ollama_active:
-            if progress_callback:
-                progress_callback(3, 10, "Ollama chưa bật, tự động chuyển sang kiến trúc PaddleOCR Offline...")
-            res = self._recognize_offline(image, start_time, progress_callback=progress_callback)
-            if not res.error:
-                res.full_text = "💡 [Ghi chú: Ollama chưa khởi chạy, hệ thống đã tự động nhận diện bằng PaddleOCR Offline]\n\n" + res.full_text
-            return res
-
-        # Mã hóa ảnh gửi cho Qwen-3
-        success, buf = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-        if not success:
-            return self._recognize_offline(image, start_time, progress_callback=progress_callback)
-
-        b64_img = base64.b64encode(buf.tobytes()).decode("utf-8")
-
-        prompt = (
-            "Trích xuất toàn bộ văn bản trong tài liệu tiếng Việt này. "
-            "Giữ nguyên định dạng, bảng biểu, dấu tiếng Việt chính xác 100%."
-        )
-
-        payload = {
-            "model": "qwen2.5-vl",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt,
-                    "images": [b64_img]
-                }
-            ],
-            "stream": False
-        }
-
-        try:
-            if progress_callback:
-                progress_callback(5, 10, "Qwen-3 đang xử lý nhận diện tài liệu...")
-            req = urllib.request.Request(
-                f"{self.ollama_endpoint.rstrip('/')}/api/chat",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                text = data.get("message", {}).get("content", "").strip()
-
-            if not text:
-                return self._recognize_offline(image, start_time, progress_callback=progress_callback)
-
-            extracted_fields = extract_structured_fields(text)
-            total_time = round(time.time() - start_time, 2)
-
-            if progress_callback:
-                progress_callback(10, 10, "Hoàn tất nhận diện Qwen-3!")
-
-            return OCRResult(
-                full_text=text,
-                boxes=[],
-                elapse_time=total_time,
-                char_count=len(text),
-                word_count=len(text.split()),
-                extracted_fields=extracted_fields
-            )
-        except Exception:
-            # Fallback to PaddleOCR
-            return self._recognize_offline(image, start_time, progress_callback=progress_callback)
-
-    # Aliases for backward compatibility
-    _recognize_gemini = _recognize_online
-    _recognize_hybrid = _recognize_offline
-
     def _sort_reading_order(self, boxes: List[OCRBox]) -> List[OCRBox]:
-        """Sort bounding boxes in natural reading order: top-down, left-right."""
+        """Sắp xếp các bounding box theo thứ tự đọc tự nhiên từ trên xuống, trái sang phải."""
         if not boxes:
             return []
 
@@ -952,7 +1265,7 @@ class OCREngine:
         return sorted_boxes
 
     def _reconstruct_lines(self, sorted_boxes: List[OCRBox]) -> List[str]:
-        """Reconstruct plain text lines from sorted OCR boxes."""
+        """Tái cấu trúc văn bản thuần theo từng dòng đọc."""
         if not sorted_boxes:
             return []
 

@@ -38,8 +38,7 @@ class OCRPanel(QWidget):
         eng_layout = QVBoxLayout(grp_engine)
         self.combo_engine = QComboBox()
         self.combo_engine.addItem("🌐 Online (AI Vision Cloud) — Chuẩn 100% Viết tay & In ấn (Google Gemini)", "online")
-        self.combo_engine.addItem("💻 Offline (PaddleOCR DBNet) — Quét siêu tốc 2s, 100% Không mạng (PP-OCR + Smart AI)", "offline")
-        self.combo_engine.addItem("🤖 Thử nghiệm Qwen-3 / Local VLM — Mô hình Vision LM Offline (Ollama / Local)", "qwen")
+        self.combo_engine.addItem("💻 Offline (PaddleOCR DBNet + VietOCR) — Nhận diện tiếng Việt & Viết tay 100% Offline", "offline")
         self.combo_engine.currentIndexChanged.connect(self._on_engine_changed)
         eng_layout.addWidget(self.combo_engine)
 
@@ -121,8 +120,8 @@ class OCRPanel(QWidget):
         self.text_edit = QTextEdit()
         self.text_edit.setPlaceholderText(
             "Kết quả nhận diện văn bản OCR sẽ hiển thị tại đây...\n\n"
-            "• Chế độ 🌐 Online (Google Gemini AI): Chuẩn 100% chữ in, chữ viết tay, bảng biểu, hoá đơn.\n"
-            "• Chế độ 💻 Offline (PP-OCR + Smart AI): Quét siêu tốc 2s hoàn toàn Offline, khôi phục dấu tiếng Việt chuẩn xác.\n\n"
+            "• Chế độ 🌐 Online (Google Gemini AI): Chuẩn 100% chữ in, chữ viết tay, bảng biểu, hoá đơn qua đám mây.\n"
+            "• Chế độ 💻 Offline (PaddleOCR DBNet + VietOCR): Tiền xử lý Deskew/Threshold, định vị vùng chữ DBNet, nhận diện tiếng Việt VietOCR & bóc tách cấu trúc đơn hàng 100% Offline.\n\n"
             "Bạn có thể trực tiếp chỉnh sửa văn bản trước khi xuất PDF."
         )
         layout.addWidget(self.text_edit)
@@ -187,16 +186,20 @@ class OCRPanel(QWidget):
         stat_text = f"Ký tự: {result.char_count} | Từ: {result.word_count} | Thời gian: {result.elapse_time}s"
         if getattr(result, "extracted_fields", None):
             tags = []
-            if "names" in result.extracted_fields:
+            if result.extracted_fields.get("customer_name"):
+                tags.append(f"KH: {result.extracted_fields['customer_name'][0]}")
+            elif result.extracted_fields.get("names"):
                 tags.append(f"Tên: {result.extracted_fields['names'][0]}")
-            if "cccd" in result.extracted_fields:
-                tags.append(f"CCCD: {', '.join(result.extracted_fields['cccd'])}")
-            if "dob" in result.extracted_fields:
-                tags.append(f"Sinh: {result.extracted_fields['dob'][0]}")
-            if "mst" in result.extracted_fields:
-                tags.append(f"MST: {', '.join(result.extracted_fields['mst'])}")
-            if "amounts" in result.extracted_fields:
+            if result.extracted_fields.get("phones"):
+                tags.append(f"SĐT: {result.extracted_fields['phones'][0]}")
+            if result.extracted_fields.get("provinces"):
+                tags.append(f"Tỉnh/Thành: {result.extracted_fields['provinces'][0]}")
+            if result.extracted_fields.get("amounts"):
                 tags.append(f"Tiền: {result.extracted_fields['amounts'][0]}")
+            if result.extracted_fields.get("products"):
+                tags.append(f"SP: {len(result.extracted_fields['products'])}")
+            if result.extracted_fields.get("cccd"):
+                tags.append(f"CCCD: {', '.join(result.extracted_fields['cccd'])}")
             if tags:
                 stat_text += f" | 📌 {' • '.join(tags)}"
 

@@ -1,4 +1,4 @@
-﻿# Byte-compiled / optimized / DLL files
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
@@ -38,6 +38,19 @@ $RECYCLE.BIN/
 scratch/
 test_docs/
 test_*.png
-test_*.jpg
 output_*.pdf
 *.log
+
+# Large deep learning weights (>100MB exceeds GitHub limit)
+*.pth
+weights/*.pth
+*.pdparams
+*.pdopt
+*.tar
+
+# Fine-tuning directories
+.venv_paddle/
+PaddleOCR/
+pretrained/
+train_data/
+tuning_data/

@@ -8,31 +8,12 @@ echo ================================================================
 echo.
 echo Dang kiem tra moi truong va tien hanh dong goi bang PyInstaller...
 echo Vui long doi trong it phut de PyInstaller thu thap tat ca cac thu vien,
-echo mo hinh AI ONNX va tap tin thuc thi...
+echo mo hinh AI ONNX, trong so VietOCR va tap tin thuc thi...
 echo.
 
 cd /d "%~dp0"
 
-pyinstaller --noconfirm --onedir --windowed ^
-    --name "SuperOCRPDFStudio" ^
-    --add-data "core;core" ^
-    --add-data "ui;ui" ^
-    --collect-all onnxruntime ^
-    --collect-all rapidocr_onnxruntime ^
-    --collect-all pymupdf ^
-    --collect-all PySide6 ^
-    --collect-all google.genai ^
-    --collect-all pydantic ^
-    --hidden-import "cv2" ^
-    --hidden-import "numpy" ^
-    --hidden-import "PIL" ^
-    --hidden-import "yaml" ^
-    --hidden-import "onnxruntime" ^
-    --hidden-import "google" ^
-    --hidden-import "google.genai" ^
-    --hidden-import "google.genai.types" ^
-    --hidden-import "pydantic" ^
-    main.py
+pyinstaller --noconfirm SuperOCRPDFStudio.spec
 
 if errorlevel 1 (
     echo.

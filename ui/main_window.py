@@ -419,10 +419,8 @@ class MainWindow(QMainWindow):
                 )
                 return
             mode_label = "Google Gemini Vision AI (Online)"
-        elif engine_mode in ("qwen", "qwen3"):
-            mode_label = "Qwen-3 / Vision LM Local"
         else:
-            mode_label = "PaddleOCR DBNet + Smart AI (Offline)"
+            mode_label = "PaddleOCR DBNet + VietOCR (Offline)"
         # For OCR: use clean original image (rotated if user adjusted orientation)
         ocr_image = item.original_image
         if item.rotation != 0:
@@ -505,7 +503,7 @@ class MainWindow(QMainWindow):
             "<li><b>Làm nét chữ:</b> Unsharp Masking, CLAHE, lọc viền chi tiết, khử nhòe mờ</li>"
             "<li><b>Siêu phân giải:</b> Phóng to 2x, 3x, 4x với thuật toán Lanczos-4 không vỡ hạt</li>"
             "<li><b>Tẩy trắng nền:</b> Khử bóng đổ, làm trắng trang giấy sạch sẽ</li>"
-            "<li><b>Nhận diện OCR 2 Chế độ:</b> 🌐 Online (Google Gemini AI chuẩn xác 100% viết tay) & 💻 Offline (PP-OCR siêu tốc 2s không cần mạng)</li>"
+            "<li><b>Nhận diện OCR:</b> 🌐 Online (Google Gemini AI) & 💻 Offline Tiếng Việt & Viết tay (PaddleOCR DBNet + VietOCR)</li>"
             "<li><b>Xuất PDF:</b> Hỗ trợ Searchable PDF (có lớp chữ ẩn tìm kiếm/copy được) và High-Res Image PDF</li>"
             "</ul>"
             "<p><i>Phát triển bởi Fami (fami_7006)</i></p>"
