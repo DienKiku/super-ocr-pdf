@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('core', 'core'), ('ui', 'ui'), ('weights', 'weights')]
+datas = [('core', 'core'), ('ui', 'ui'), ('weights', 'weights'), ('assets', 'assets')]
 binaries = []
 hiddenimports = ['cv2', 'numpy', 'PIL', 'yaml', 'onnxruntime', 'google', 'google.genai', 'google.genai.types', 'pydantic', 'torch', 'torchvision', 'vietocr']
 tmp_ret = collect_all('onnxruntime')
@@ -53,6 +53,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='assets/logo.ico',
 )
 coll = COLLECT(
     exe,

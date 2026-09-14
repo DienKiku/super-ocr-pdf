@@ -92,11 +92,11 @@ class OCRPanel(QWidget):
         btn_layout = QHBoxLayout()
         self.btn_scan_current = QPushButton("🔍 Quét trang này")
         self.btn_scan_current.setObjectName("primary_btn")
-        self.btn_scan_current.clicked.connect(self.scan_current_requested.emit)
+        self.btn_scan_current.clicked.connect(self._on_scan_current_clicked)
 
         self.btn_scan_all = QPushButton("⚡ Quét tất cả trang")
         self.btn_scan_all.setObjectName("success_btn")
-        self.btn_scan_all.clicked.connect(self.scan_all_requested.emit)
+        self.btn_scan_all.clicked.connect(self._on_scan_all_clicked)
 
         btn_layout.addWidget(self.btn_scan_current)
         btn_layout.addWidget(self.btn_scan_all)
@@ -120,8 +120,8 @@ class OCRPanel(QWidget):
         self.text_edit = QTextEdit()
         self.text_edit.setPlaceholderText(
             "Kết quả nhận diện văn bản OCR sẽ hiển thị tại đây...\n\n"
-            "• Chế độ 🌐 Online (Google Gemini AI): Chuẩn 100% chữ in, chữ viết tay, bảng biểu, hoá đơn qua đám mây.\n"
-            "• Chế độ 💻 Offline (PaddleOCR DBNet + VietOCR): Tiền xử lý Deskew/Threshold, định vị vùng chữ DBNet, nhận diện tiếng Việt VietOCR & bóc tách cấu trúc đơn hàng 100% Offline.\n\n"
+            "• Chế độ 🌐 Online (Google Gemini AI): Chuẩn 100% chữ in, chữ viết tay, bảng biểu qua đám mây.\n"
+            "• Chế độ 💻 Offline (PaddleOCR DBNet + VietOCR): Tiền xử lý Deskew, định vị vùng chữ DBNet & nhận diện tiếng Việt VietOCR 100% Offline.\n\n"
             "Bạn có thể trực tiếp chỉnh sửa văn bản trước khi xuất PDF."
         )
         layout.addWidget(self.text_edit)
@@ -166,11 +166,26 @@ class OCRPanel(QWidget):
     def _on_api_key_changed(self, text: str):
         ConfigManager.get_instance().set_gemini_api_key(text.strip())
 
+    def _on_scan_current_clicked(self):
+        self.scan_current_requested.emit()
+
+    def _on_scan_all_clicked(self):
+        self.scan_all_requested.emit()
+
+    def set_scanning_state(self, is_scanning: bool):
+        """Khóa/mở nút bấm và cập nhật trạng thái khi đang quét OCR."""
+        self.btn_scan_current.setEnabled(not is_scanning)
+        self.btn_scan_all.setEnabled(not is_scanning)
+        if is_scanning:
+            self.btn_scan_current.setText("⏳ Đang quét OCR...")
+        else:
+            self.btn_scan_current.setText("🔍 Quét trang này")
+
     def get_selected_engine(self) -> str:
         return self.combo_engine.currentData()
 
     def set_ocr_result(self, result: Optional[OCRResult]):
-        """Populate OCR text and stats."""
+        """Hiển thị kết quả OCR văn bản thuần và thông số thống kê."""
         if result is None:
             self.text_edit.clear()
             self.lbl_stats.setText("Chưa quét OCR cho trang này.")
@@ -182,28 +197,9 @@ class OCRPanel(QWidget):
             return
 
         self.text_edit.setPlainText(result.full_text)
-
-        stat_text = f"Ký tự: {result.char_count} | Từ: {result.word_count} | Thời gian: {result.elapse_time}s"
-        if getattr(result, "extracted_fields", None):
-            tags = []
-            if result.extracted_fields.get("customer_name"):
-                tags.append(f"KH: {result.extracted_fields['customer_name'][0]}")
-            elif result.extracted_fields.get("names"):
-                tags.append(f"Tên: {result.extracted_fields['names'][0]}")
-            if result.extracted_fields.get("phones"):
-                tags.append(f"SĐT: {result.extracted_fields['phones'][0]}")
-            if result.extracted_fields.get("provinces"):
-                tags.append(f"Tỉnh/Thành: {result.extracted_fields['provinces'][0]}")
-            if result.extracted_fields.get("amounts"):
-                tags.append(f"Tiền: {result.extracted_fields['amounts'][0]}")
-            if result.extracted_fields.get("products"):
-                tags.append(f"SP: {len(result.extracted_fields['products'])}")
-            if result.extracted_fields.get("cccd"):
-                tags.append(f"CCCD: {', '.join(result.extracted_fields['cccd'])}")
-            if tags:
-                stat_text += f" | 📌 {' • '.join(tags)}"
-
-        self.lbl_stats.setText(stat_text)
+        self.lbl_stats.setText(
+            f"Ký tự: {result.char_count} | Từ: {result.word_count} | Thời gian quét: {result.elapse_time}s"
+        )
 
     def get_text(self) -> str:
         return self.text_edit.toPlainText()

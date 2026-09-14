@@ -1,6 +1,6 @@
 """
 Entry point for Super OCR & High-Res PDF Studio.
-Version: 3.0.1 (Integrated Cinnamon AI Vietnamese Handwriting OCR Model)
+Version: 3.2.0 (Accurate Natural Vietnamese OCR & New App Icon)
 Updated: 2026-09-14 by Fami (fami_7006)
 """
 
@@ -15,7 +15,7 @@ else:
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon
 
 from ui.main_window import MainWindow
 from ui.styles import DARK_THEME
@@ -37,6 +37,12 @@ def main():
 
     # Apply modern dark theme
     app.setStyleSheet(DARK_THEME)
+
+    # Set application icon
+    base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    icon_path = os.path.join(base_dir, "assets", "logo.png")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
 
     window = MainWindow()
     window.show()

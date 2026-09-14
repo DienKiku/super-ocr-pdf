@@ -54,8 +54,8 @@ class AsyncEnhanceWorker(QThread):
 
 class AsyncSingleOCRWorker(QThread):
     """Worker to run single page OCR in background without freezing the GUI."""
-    progress = Signal(int, int, str)
-    finished = Signal(int, object)  # req_id, OCRResult
+    ocr_progress = Signal(int, int, str)
+    ocr_finished = Signal(int, object)  # req_id, OCRResult
 
     def __init__(self, req_id: int, img: np.ndarray, mode: str, parent=None):
         super().__init__(parent)
@@ -74,14 +74,14 @@ class AsyncSingleOCRWorker(QThread):
             ocr = OCREngine.get_instance()
             res = ocr.recognize(self.img, mode=self.mode, progress_callback=self._on_progress)
             if not self._cancelled:
-                self.finished.emit(self.req_id, res)
+                self.ocr_finished.emit(self.req_id, res)
         except Exception as e:
             if not self._cancelled:
-                self.finished.emit(self.req_id, OCRResult(error=str(e)))
+                self.ocr_finished.emit(self.req_id, OCRResult(error=str(e)))
 
     def _on_progress(self, current: int, total: int, message: str):
         if not self._cancelled:
-            self.progress.emit(current, total, message)
+            self.ocr_progress.emit(current, total, message)
 
 
 class AsyncBatchOCRWorker(QThread):
@@ -101,20 +101,22 @@ class AsyncBatchOCRWorker(QThread):
     def run(self):
         ocr = OCREngine.get_instance()
         total = len(self.items)
-        for idx, item in enumerate(self.items):
+        for i, item in enumerate(self.items):
             if self._cancelled:
                 break
-            self.progress.emit(idx + 1, total, f"Đang quét trang {idx + 1}/{total}...")
-
+            self.progress.emit(i + 1, total, f"Đang quét trang {i + 1}/{total}...")
             # For OCR: use clean original image (rotated if user adjusted orientation)
             ocr_image = item.original_image
             if item.rotation != 0:
                 ocr_image = DocumentEnhancer.rotate_image(ocr_image, item.rotation)
 
-            if item.ocr_result is None:
-                item.ocr_result = ocr.recognize(ocr_image, mode=self.mode)
-
-        self.finished.emit()
+            try:
+                res = ocr.recognize(ocr_image, mode=self.mode)
+                item.ocr_result = res
+            except Exception as e:
+                item.ocr_result = OCRResult(error=str(e))
+        if not self._cancelled:
+            self.finished.emit()
 
 
 class MainWindow(QMainWindow):
@@ -124,6 +126,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Super OCR & High-Res PDF Studio - Làm Nét Chữ Siêu Phân Giải & Xuất PDF")
         self.resize(1280, 800)
+
+        # Cài đặt Logo cho cửa sổ ứng dụng
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        icon_path = os.path.join(base_dir, "assets", "logo.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         self._enhance_req_id = 0
         self._active_enhance_workers: List[AsyncEnhanceWorker] = []
@@ -140,7 +148,7 @@ class MainWindow(QMainWindow):
         if worker in self._active_enhance_workers:
             self._active_enhance_workers.remove(worker)
 
-    def _cleanup_ocr_worker(self, worker: AsyncSingleOCRWorker):
+    def _cleanup_ocr_worker(self, worker: AsyncSingleOCRWorker, *args):
         if worker in self._active_ocr_workers:
             self._active_ocr_workers.remove(worker)
 
@@ -397,10 +405,6 @@ class MainWindow(QMainWindow):
 
         self.tabs.setCurrentWidget(self.ocr_panel)
 
-        # Ensure we have enhanced image
-        if item.enhanced_image is None:
-            item.enhanced_image = DocumentEnhancer.process(item.original_image, item.params)
-
         # Cancel existing single OCR workers if running
         for w in self._active_ocr_workers:
             w.cancel()
@@ -421,6 +425,7 @@ class MainWindow(QMainWindow):
             mode_label = "Google Gemini Vision AI (Online)"
         else:
             mode_label = "PaddleOCR DBNet + VietOCR (Offline)"
+
         # For OCR: use clean original image (rotated if user adjusted orientation)
         ocr_image = item.original_image
         if item.rotation != 0:
@@ -429,17 +434,25 @@ class MainWindow(QMainWindow):
         self._ocr_req_id += 1
         req_id = self._ocr_req_id
 
+        # Phản hồi giao diện tức thì
+        self.ocr_panel.set_scanning_state(True)
+        self.ocr_panel.set_progress(1, 10, "Bắt đầu khởi tạo OCR...")
+        self.status_bar.showMessage(f"Đang quét OCR trang hiện tại ({mode_label})...")
+
         worker = AsyncSingleOCRWorker(req_id, ocr_image, engine_mode, parent=self)
         self._active_ocr_workers.append(worker)
-        worker.progress.connect(self.ocr_panel.set_progress)
-        worker.finished.connect(self._on_single_ocr_finished)
+        worker.ocr_progress.connect(self.ocr_panel.set_progress)
+        worker.ocr_finished.connect(self._on_single_ocr_finished)
         worker.finished.connect(lambda w=worker: self._cleanup_ocr_worker(w))
         worker.start()
 
     def _on_single_ocr_finished(self, req_id: int, res: OCRResult):
+        self.ocr_panel.set_scanning_state(False)
+        self.ocr_panel.set_progress(0, 0)
+
         if req_id != self._ocr_req_id:
             return
-        self.ocr_panel.set_progress(0, 0)
+
         item = self.image_list.get_current_item()
         if item:
             item.ocr_result = res
@@ -474,12 +487,18 @@ class MainWindow(QMainWindow):
                 )
                 return
 
+        total_pages = max(1, len(self.image_list.items))
+        self.ocr_panel.set_scanning_state(True)
+        self.ocr_panel.set_progress(1, total_pages, "Bắt đầu quét tất cả các trang...")
+        self.status_bar.showMessage("Đang quét OCR cho toàn bộ tài liệu...")
+
         self.batch_ocr_worker = AsyncBatchOCRWorker(self.image_list.items, mode=engine_mode, parent=self)
         self.batch_ocr_worker.progress.connect(self.ocr_panel.set_progress)
         self.batch_ocr_worker.finished.connect(self._on_batch_ocr_finished)
         self.batch_ocr_worker.start()
 
     def _on_batch_ocr_finished(self):
+        self.ocr_panel.set_scanning_state(False)
         self.ocr_panel.set_progress(0, 0)
         item = self.image_list.get_current_item()
         if item and item.ocr_result:
@@ -497,7 +516,7 @@ class MainWindow(QMainWindow):
 
     def _show_about(self):
         msg = (
-            "<h3>Super OCR & High-Res PDF Studio</h3>"
+            "<h3>Super OCR & High-Res PDF Studio (v3.2.0)</h3>"
             "<p><b>Phần mềm phục chế làm nét văn bản, quét OCR và xuất PDF siêu phân giải</b></p>"
             "<ul>"
             "<li><b>Làm nét chữ:</b> Unsharp Masking, CLAHE, lọc viền chi tiết, khử nhòe mờ</li>"

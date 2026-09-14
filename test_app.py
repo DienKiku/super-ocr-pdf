@@ -15,7 +15,7 @@ import pymupdf
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.enhancer import DocumentEnhancer, EnhanceParams, PRESETS
-from core.ocr_engine import OCREngine, OCRResult, preprocess_order_image, PaddleOCRDetector, VietOCREngine, match_and_standardize_province, crop_text_box
+from core.ocr_engine import OCREngine, OCRResult, preprocess_order_image, PaddleOCRDetector, VietOCREngine, crop_text_box
 from core.pdf_builder import PDFBuilder, PageData, PDFConfig
 
 
@@ -83,14 +83,13 @@ class TestSuperOCRPDF(unittest.TestCase):
         self.assertGreater(var_enh, var_orig, "Enhanced image should have significantly higher edge contrast")
 
     def test_03_ocr_recognition(self):
-        """Test the 4-step offline OCR: Step 1 (Preprocessing/Deskew), Step 2 (PaddleOCR Detection & Crop), Step 3 (VietOCR), Step 4 (Structuring & Province Dictionary)."""
-        from core.ocr_engine import extract_structured_fields, preprocess_for_ocr, preprocess_order_image, PaddleOCRDetector, VietOCREngine, match_and_standardize_province, crop_text_box
+        """Test the 3-step offline OCR: Step 1 (Preprocessing/Deskew), Step 2 (PaddleOCR Detection & Crop), Step 3 (VietOCR Recognition)."""
+        from core.ocr_engine import preprocess_order_image, PaddleOCRDetector, VietOCREngine, crop_text_box
 
         # --- Bước 1: Tiền xử lý ảnh (Pre-processing) ---
-        deskewed_color, thresh_img, angle = preprocess_order_image(self.test_img, deskew=True, apply_adaptive_thresh=True)
+        deskewed_color, thresh_img, angle = preprocess_order_image(self.test_img, deskew=True, apply_adaptive_thresh=False)
         self.assertIsNotNone(deskewed_color)
-        self.assertIsNotNone(thresh_img)
-        self.assertEqual(len(thresh_img.shape), 2)  # Hệ màu xám / nhị phân adaptive
+        self.assertEqual(deskewed_color.shape[:2], self.test_img.shape[:2])
 
         # --- Bước 2: Định vị vùng chữ với PaddleOCR DBNet (Detection Only) ---
         det = PaddleOCRDetector.get_instance()
@@ -107,7 +106,7 @@ class TestSuperOCRPDF(unittest.TestCase):
         sample_crop_text = vietocr.predict_image(cropped_box)
         self.assertIsInstance(sample_crop_text, str)
 
-        # Toàn bộ pipeline nhận diện Offline OCREngine
+        # Toàn bộ pipeline nhận diện Offline OCREngine (trả về văn bản thuần sạch)
         ocr = OCREngine.get_instance()
         ocr.engine_mode = "offline"
         res = ocr.recognize(self.test_img, mode="offline")
@@ -115,34 +114,7 @@ class TestSuperOCRPDF(unittest.TestCase):
         self.assertIsNone(res.error)
         self.assertGreater(len(res.boxes), 0, "Should detect at least one text box")
         self.assertTrue("4K" in res.full_text or "DOCUMENT" in res.full_text or len(res.full_text) > 5)
-
-        # --- Bước 4: Hậu xử lý dữ liệu (Post-processing & Structuring) ---
-        # 1. Dictionary Matching 63 tỉnh thành Việt Nam với chuẩn hóa chữ viết tay
-        prov1, fixed1 = match_and_standardize_province("123 Cầu Giấy, Hà nọi")
-        self.assertEqual(prov1, "Hà Nội")
-        self.assertIn("Hà Nội", fixed1)
-
-        prov2, fixed2 = match_and_standardize_province("Phường Bến Nghé, Quận 1, TPHCM")
-        self.assertEqual(prov2, "TP. Hồ Chí Minh")
-        self.assertIn("TP. Hồ Chí Minh", fixed2)
-
-        # 2. Regex: Số điện thoại 10 chữ số bắt đầu bằng 0, tổng tiền, ngày tháng
-        sample_order_doc = (
-            "CỬA HÀNG THỜI TRANG ABC\n"
-            "ĐƠN HÀNG: DH-2026\n"
-            "Người nhận: NGUYỄN VĂN AN\n"
-            "Số điện thoại: 0901234567\n"
-            "Địa chỉ: 123 Đường Cầu Giấy, Hà nọi\n"
-            "Ngày: 10/09/2026\n"
-            "Áo thun nam Cotton x 2 : 300.000đ\n"
-            "Tổng cộng: 300.000 VND\n"
-        )
-        fields = extract_structured_fields(sample_order_doc)
-        self.assertIn("0901234567", fields.get("phones", []))
-        self.assertIn("NGUYỄN VĂN AN", fields.get("customer_name", []) or fields.get("names", []))
-        self.assertIn("Hà Nội", fields.get("provinces", []))
-        self.assertIn("10/09/2026", fields.get("dates", []))
-        self.assertTrue(len(fields.get("amounts", [])) > 0)
+        self.assertNotIn("📋 KẾT QUẢ BÓC TÁCH CẤU TRÚC ĐƠN HÀNG", res.full_text)
 
     def test_04_searchable_pdf_generation(self):
         """Test generating a Searchable PDF and verify extracted text layer."""

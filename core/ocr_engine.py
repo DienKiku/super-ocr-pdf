@@ -63,294 +63,8 @@ def remove_accents(s: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# BỘ TỪ ĐIỂN 63 TỈNH THÀNH VIỆT NAM & CHUẨN HÓA LỖI CHÍNH TẢ / CHỮ VIẾT TAY
+# TIỀN XỬ LÝ ẢNH & ĐỊNH DẠNG VĂN BẢN
 # ---------------------------------------------------------------------------
-
-VIETNAM_PROVINCES = [
-    "An Giang", "Bà Rịa - Vũng Tàu", "Bắc Giang", "Bắc Kạn", "Bạc Liêu", "Bắc Ninh",
-    "Bến Tre", "Bình Định", "Bình Dương", "Bình Phước", "Bình Thuận", "Cà Mau",
-    "Cần Thơ", "Cao Bằng", "Đà Nẵng", "Đắk Lắk", "Đắk Nông", "Điện Biên", "Đồng Nai",
-    "Đồng Tháp", "Gia Lai", "Hà Giang", "Hà Nam", "Hà Nội", "Hà Tĩnh", "Hải Dương",
-    "Hải Phòng", "Hậu Giang", "Hòa Bình", "Hưng Yên", "Khánh Hòa", "Kiên Giang",
-    "Kon Tum", "Lai Châu", "Lâm Đồng", "Lạng Sơn", "Lào Cai", "Long An", "Nam Định",
-    "Nghệ An", "Ninh Bình", "Ninh Thuận", "Phú Thọ", "Phú Yên", "Quảng Bình",
-    "Quảng Nam", "Quảng Ngãi", "Quảng Ninh", "Quảng Trị", "Sóc Trăng", "Sơn La",
-    "Tây Ninh", "Thái Bình", "Thái Nguyên", "Thanh Hóa", "Thừa Thiên Huế", "Tiền Giang",
-    "TP. Hồ Chí Minh", "Trà Vinh", "Tuyên Quang", "Vĩnh Long", "Vĩnh Phúc", "Yên Bái"
-]
-
-PROVINCE_ALIASES_AND_TYPOS = {
-    # Hà Nội & biến thể nhận diện chữ viết tay
-    "ha noi": "Hà Nội",
-    "hà nọi": "Hà Nội",
-    "ha nọi": "Hà Nội",
-    "hanoi": "Hà Nội",
-    "hà nôi": "Hà Nội",
-    "hà nôi.": "Hà Nội",
-    "hn": "Hà Nội",
-    "h.n": "Hà Nội",
-    # TP. Hồ Chí Minh & biến thể
-    "tp hcm": "TP. Hồ Chí Minh",
-    "tphcm": "TP. Hồ Chí Minh",
-    "tp.hcm": "TP. Hồ Chí Minh",
-    "tp. hcm": "TP. Hồ Chí Minh",
-    "tp ho chi minh": "TP. Hồ Chí Minh",
-    "tp. ho chi minh": "TP. Hồ Chí Minh",
-    "ho chi minh": "TP. Hồ Chí Minh",
-    "hồ chí minh": "TP. Hồ Chí Minh",
-    "sai gon": "TP. Hồ Chí Minh",
-    "saigon": "TP. Hồ Chí Minh",
-    "sài gòn": "TP. Hồ Chí Minh",
-    "hcm": "TP. Hồ Chí Minh",
-    # Đà Nẵng
-    "da nang": "Đà Nẵng",
-    "đà năng": "Đà Nẵng",
-    "da năng": "Đà Nẵng",
-    "danang": "Đà Nẵng",
-    "đn": "Đà Nẵng",
-    # Hải Phòng
-    "hai phong": "Hải Phòng",
-    "haiphong": "Hải Phòng",
-    "hải phỏng": "Hải Phòng",
-    "hp": "Hải Phòng",
-    # Cần Thơ
-    "can tho": "Cần Thơ",
-    "cantho": "Cần Thơ",
-    "cần thỏ": "Cần Thơ",
-    # Bình Dương
-    "binh duong": "Bình Dương",
-    "bình duơng": "Bình Dương",
-    "binhduong": "Bình Dương",
-    "bd": "Bình Dương",
-    # Đồng Nai
-    "dong nai": "Đồng Nai",
-    "dongnai": "Đồng Nai",
-    # Bà Rịa - Vũng Tàu
-    "ba ria - vung tau": "Bà Rịa - Vũng Tàu",
-    "ba ria vung tau": "Bà Rịa - Vũng Tàu",
-    "vung tau": "Bà Rịa - Vũng Tàu",
-    "vũng tàu": "Bà Rịa - Vũng Tàu",
-    "bà rịa": "Bà Rịa - Vũng Tàu",
-    # Lâm Đồng / Đà Lạt
-    "lam dong": "Lâm Đồng",
-    "da lat": "Lâm Đồng",
-    "đà lạt": "Lâm Đồng",
-    # Khánh Hòa / Nha Trang
-    "khanh hoa": "Khánh Hòa",
-    "nha trang": "Khánh Hòa",
-    # Thừa Thiên Huế
-    "thua thien hue": "Thừa Thiên Huế",
-    "hue": "Thừa Thiên Huế",
-    "huế": "Thừa Thiên Huế",
-    # Quảng Ninh
-    "quang ninh": "Quảng Ninh",
-    "ha long": "Quảng Ninh",
-    "hạ long": "Quảng Ninh",
-    # Bắc Ninh
-    "bac ninh": "Bắc Ninh",
-    "bacninh": "Bắc Ninh",
-    # Hải Dương
-    "hai duong": "Hải Dương",
-    # Hưng Yên
-    "hung yen": "Hưng Yên",
-    # Nam Định
-    "nam dinh": "Nam Định",
-    # Thái Bình
-    "thai binh": "Thái Bình",
-    # Thanh Hóa
-    "thanh hoa": "Thanh Hóa",
-    # Nghệ An / Vinh
-    "nghe an": "Nghệ An",
-    "tp vinh": "Nghệ An",
-}
-
-
-def match_and_standardize_province(addr: str) -> Tuple[Optional[str], str]:
-    """
-    So khớp từ điển (Dictionary Matching) chứa các tỉnh thành Việt Nam
-    để nhận diện và chuẩn hóa lỗi chính tả chữ viết tay trong địa chỉ
-    (Ví dụ: '123 Cầu Giấy, Hà nọi' -> Tỉnh: 'Hà Nội', Chuẩn hóa: '123 Cầu Giấy, Hà Nội').
-    """
-    if not addr:
-        return None, addr
-
-    addr_clean = unicodedata.normalize('NFC', addr.strip())
-    addr_lower = addr_clean.lower()
-    addr_no_acc = remove_accents(addr_lower).lower()
-
-    # 1. So khớp trực tiếp alias / lỗi chính tả trên văn bản gốc
-    for alias, canonical in PROVINCE_ALIASES_AND_TYPOS.items():
-        pattern = r'(?i)\b' + re.escape(alias) + r'\b'
-        if re.search(pattern, addr_clean):
-            fixed_addr = re.sub(pattern, canonical, addr_clean)
-            return canonical, fixed_addr
-
-    # 2. So khớp alias / lỗi chính tả trên chuỗi không dấu (đồng bộ vị trí ký tự 1:1)
-    for alias, canonical in PROVINCE_ALIASES_AND_TYPOS.items():
-        pattern_no_acc = r'\b' + re.escape(alias) + r'\b'
-        m = re.search(pattern_no_acc, addr_no_acc)
-        if m:
-            start, end = m.span()
-            fixed_addr = addr_clean[:start] + canonical + addr_clean[end:]
-            return canonical, fixed_addr
-
-    # 3. So khớp trực tiếp với 63 tỉnh thành chính thức
-    for prov in VIETNAM_PROVINCES:
-        pattern = r'(?i)\b' + re.escape(prov) + r'\b'
-        if re.search(pattern, addr_clean):
-            return prov, addr_clean
-
-    for prov in VIETNAM_PROVINCES:
-        prov_no_acc = remove_accents(prov.lower())
-        pattern_no_acc = r'\b' + re.escape(prov_no_acc) + r'\b'
-        m = re.search(pattern_no_acc, addr_no_acc)
-        if m:
-            start, end = m.span()
-            fixed_addr = addr_clean[:start] + prov + addr_clean[end:]
-            return prov, fixed_addr
-
-    # 4. Fuzzy matching cho chữ viết ngoáy
-    words = [w.strip(" ,.-;") for w in addr_clean.split()]
-    for i in range(len(words)):
-        for length in (2, 3, 4):
-            if i + length <= len(words):
-                chunk = " ".join(words[i:i + length])
-                chunk_no_acc = remove_accents(chunk.lower())
-                for prov in VIETNAM_PROVINCES:
-                    prov_no_acc = remove_accents(prov.lower())
-                    ratio = difflib.SequenceMatcher(None, chunk_no_acc, prov_no_acc).ratio()
-                    if ratio >= 0.82:
-                        fixed_addr = addr_clean.replace(chunk, prov)
-                        return prov, fixed_addr
-
-    return None, addr_clean
-
-
-class SmartVietnameseRestorer:
-    """
-    High-precision Vietnamese diacritic restorer & typo fixer.
-    Runs in < 10ms using n-gram greedy matching with O(1) hash lookups.
-    """
-
-    def __init__(self, dict_path: Optional[str] = None):
-        self.ngram_dict: Dict[str, str] = {}
-
-        self.typo_fixes = [
-            (r"\bCONG TY TNHHMAI\b", "CÔNG TY TNHH MAI"),
-            (r"\bTNHHMAI\b", "TNHH MAI"),
-            (r"\bHONG GIAO DICH\b", "PHÒNG GIAO DỊCH"),
-            (r"\bhong giao dich\b", "phòng giao dịch"),
-            (r"\bPHONG GIAO DICH\b", "PHÒNG GIAO DỊCH"),
-            (r"\bPHONG GIAO DỊCH\b", "PHÒNG GIAO DỊCH"),
-            (r"\bphong giao dich\b", "phòng giao dịch"),
-            (r"\bphong giao dịch\b", "phòng giao dịch"),
-            (r"\bnguroi\b", "người"),
-            (r"\bNguroi\b", "Người"),
-            (r"\bthurc\b", "thực"),
-            (r"\bThurc\b", "Thực"),
-            (r"\bduroc\b", "được"),
-            (r"\bDuroc\b", "Được"),
-            (r"\btur\b", "từ"),
-            (r"\bTur\b", "Từ"),
-            (r"\btir\b", "từ"),
-            (r"\blurgng\b", "lượng"),
-            (r"\bLurgng\b", "Lượng"),
-            (r"\bst dung\b", "sử dụng"),
-            (r"\bSt dung\b", "Sử dụng"),
-            (r"\bthi cong\b", "thủ công"),
-            (r"\bThi cong\b", "Thủ công"),
-            (r"\bphan men\b", "phần mềm"),
-            (r"\bPhan men\b", "Phần mềm"),
-            (r"\bdoi turong\b", "đối tượng"),
-            (r"\bDoi turong\b", "Đối tượng"),
-            (r"\bdja chi\b", "địa chỉ"),
-            (r"\bDja chi\b", "Địa chỉ"),
-            (r"\bdien thogi\b", "điện thoại"),
-            (r"\bDien thogi\b", "Điện thoại"),
-            (r"\bnguoilienhe\b", "người liên hệ"),
-            (r"\bNguoilienhe\b", "Người liên hệ"),
-            (r"\bkhich hiang\b", "khách hàng"),
-            (r"\bKhich hiang\b", "Khách hàng"),
-            (r"\bCAN CUOC CONG DAN\b", "CĂN CƯỚC CÔNG DÂN"),
-            (r"\bcan cuoc cong dan\b", "căn cước công dân"),
-            (r"\bCan cuoc cong dan\b", "Căn cước công dân"),
-            (r"\bCONG HOA XA HOI CHU NGHIA VIET NAM\b", "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM"),
-            (r"\bDOC LAP - TU DO - HANH PHUC\b", "ĐỘC LẬP - TỰ DO - HẠNH PHÚC"),
-        ]
-
-        if dict_path and os.path.exists(dict_path):
-            self._load_dictionary(dict_path)
-
-    def _load_dictionary(self, path: str):
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    word = line.strip()
-                    if word:
-                        normalized = unicodedata.normalize('NFC', word)
-                        stripped = remove_accents(normalized).lower()
-                        if stripped not in self.ngram_dict:
-                            self.ngram_dict[stripped] = normalized
-        except Exception:
-            pass
-
-    @staticmethod
-    def match_word_case(orig: str, target: str) -> str:
-        if orig.isupper():
-            return target.upper()
-        if orig and orig[0].isupper():
-            return target.capitalize()
-        return target.lower()
-
-    def restore_line(self, line: str) -> str:
-        if not line.strip():
-            return line
-
-        cur = line
-        for pat, rep in self.typo_fixes:
-            cur = re.sub(pat, rep, cur)
-
-        tokens = re.split(r'(\s+|[^\w\s]+)', cur)
-        word_indices = [idx for idx, tok in enumerate(tokens) if re.search(r'\w', tok)]
-        words = [tokens[idx] for idx in word_indices]
-
-        if not words:
-            return cur
-
-        i = 0
-        total = len(words)
-        while i < total:
-            matched = False
-            for n in range(min(5, total - i), 0, -1):
-                chunk = words[i:i + n]
-                clean_chunk = [re.sub(r'^[^\w]+|[^\w]+$', '', w) for w in chunk]
-                if any(not w for w in clean_chunk):
-                    continue
-
-                phrase = " ".join(clean_chunk)
-                phrase_lower = phrase.lower()
-                stripped = remove_accents(phrase_lower)
-
-                if stripped in self.ngram_dict:
-                    restored_phrase = self.ngram_dict[stripped]
-                    restored_words = restored_phrase.split()
-                    if len(restored_words) == n:
-                        for k in range(n):
-                            orig_tok = words[i + k]
-                            orig_clean = clean_chunk[k]
-                            rest_word = restored_words[k]
-                            cased_word = self.match_word_case(orig_clean, rest_word)
-                            lead_punc = orig_tok[:len(orig_tok) - len(orig_tok.lstrip('^~`!@#$%^&*()_+-=[]{}|;:\'",.<>?/\\'))]
-                            trail_punc = orig_tok[len(orig_tok.rstrip('^~`!@#$%^&*()_+-=[]{}|;:\'",.<>?/\\')):]
-                            tokens[word_indices[i + k]] = lead_punc + cased_word + trail_punc
-                        matched = True
-                        i += n
-                        break
-            if not matched:
-                i += 1
-
-        res = "".join(tokens)
-        return unicodedata.normalize('NFC', res)
 
 
 # ---------------------------------------------------------------------------
@@ -700,219 +414,17 @@ class VietOCREngine:
 
 
 # ---------------------------------------------------------------------------
-# BƯỚC 4: HẬU XỬ LÝ DỮ LIỆU & BÓC TÁCH CẤU TRÚC (POST-PROCESSING & STRUCTURING)
+# CÁC HÀM HỖ TRỢ TƯƠNG THÍCH NGƯỢC (BACKWARD COMPATIBILITY)
 # ---------------------------------------------------------------------------
 
-def extract_structured_fields(
-    text: str,
-    boxes: Optional[List[OCRBox]] = None,
-    img_shape: Optional[Tuple[int, int]] = None
-) -> Dict[str, Any]:
-    """
-    Bước 4: Hậu xử lý dữ liệu (Post-processing & Structuring) cho đơn hàng & văn bản:
-    1. Sử dụng vị trí hình học (Spatial Heuristic)
-    2. Sử dụng biểu thức chính quy (Regex)
-    3. Sử dụng từ điển 63 tỉnh thành Việt Nam (Dictionary Matching)
-    """
-    fields: Dict[str, Any] = {
-        "customer_name": [],
-        "phones": [],
-        "addresses": [],
-        "provinces": [],
-        "products": [],
-        "amounts": [],
-        "dates": [],
-        "cccd": [],
-        "mst": [],
-        "emails": [],
-    }
-
-    # 1. Tên khách hàng / Người nhận / Người mua
-    names = re.findall(
-        r'(?:Họ\s*và\s*tên|Tên\s*khách\s*hàng|Người\s*nhận|Người\s*mua\s*hàng|Người\s*liên\s*hệ|Khách\s*hàng)[:\s]*([^\n\r,;]{2,45})',
-        text, re.IGNORECASE
-    )
-    if names:
-        cleaned_names = [re.sub(r'^[^\w]+|[^\w]+$', '', n).strip() for n in names]
-        valid_names = [n for n in cleaned_names if len(n) > 2 and not any(c.isdigit() for c in n)]
-        if valid_names:
-            fields["customer_name"] = list(dict.fromkeys(valid_names))
-            fields["names"] = fields["customer_name"]
-
-    # 2. Biểu thức chính quy: Số điện thoại (10 chữ số bắt đầu bằng 0, hoặc +84)
-    phones = re.findall(r'(?:(?:\+84|0)[235789][0-9]{8})\b', text)
-    if phones:
-        fields["phones"] = list(dict.fromkeys(phones))
-
-    # 2. Biểu thức chính quy: Mã số thuế & CCCD
-    mst = re.findall(r'(?:Mã\s*số\s*thuế|MST|Tax\s*Code)[:\s]*([0-9]{10}(?:-[0-9]{3})?)', text, re.IGNORECASE)
-    if mst:
-        fields["mst"] = list(dict.fromkeys(m.strip() for m in mst))
-
-    cccd = re.findall(r'(?:CCCD|CMND|Số\s*CCCD|Số\s*CMND)[:\s]*([0-9]{9,12})\b', text, re.IGNORECASE)
-    if cccd:
-        fields["cccd"] = list(dict.fromkeys(c.strip() for c in cccd))
-    else:
-        twelve_digits = re.findall(r'\b0[0-9]{11}\b', text)
-        if twelve_digits:
-            fields["cccd"] = list(dict.fromkeys(twelve_digits))
-
-    # 3. Biểu thức chính quy: Email
-    emails = re.findall(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', text)
-    if emails:
-        fields["emails"] = list(dict.fromkeys(emails))
-
-    # 4. Biểu thức chính quy: Ngày tháng
-    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b', text)
-    if dates:
-        fields["dates"] = list(dict.fromkeys(dates))
-
-    # 5. Biểu thức chính quy: Số tiền / Tổng cộng / COD
-    amounts = re.findall(
-        r'(?:Tổng\s*tiền(?:\s*thanh\s*toán)?|Thành\s*tiền|Cộng\s*tiền(?:\s*hàng)?|Tổng\s*cộng|Thanh\s*toán|Tiền\s*thu|COD|Giá)[:\s]*([0-9.,]+(?:\s*(?:k|VND|VNĐ|đ|đồng))?)',
-        text, re.IGNORECASE
-    )
-    if amounts:
-        fields["amounts"] = list(dict.fromkeys(a.strip() for a in amounts))
-
-    # 6. Địa chỉ & Từ điển 63 Tỉnh thành (Dictionary Matching)
-    addresses = re.findall(
-        r'(?:Nơi\s*thường\s*trú|Địa\s*chỉ(?:\s*nhận\s*hàng)?|Nơi\s*giao|Address|Đ\/C)[:\s]*([^\n\r]+)',
-        text, re.IGNORECASE
-    )
-    extracted_addrs = [re.sub(r'^[^\w]+|[^\w]+$', '', a).strip() for a in addresses if len(a.strip()) > 5]
-
-    matched_provinces = []
-    standardized_addrs = []
-
-    lines = text.splitlines()
-    for ln in lines:
-        prov, fixed = match_and_standardize_province(ln)
-        if prov and prov not in matched_provinces:
-            matched_provinces.append(prov)
-        if any(keyword in ln.lower() for keyword in ("địa chỉ", "đ/c", "dia chi", "phường", "xã", "quận", "huyện", "thị trấn", "đường")):
-            standardized_addrs.append(fixed)
-
-    for addr in extracted_addrs:
-        prov, fixed = match_and_standardize_province(addr)
-        if prov and prov not in matched_provinces:
-            matched_provinces.append(prov)
-        if fixed not in standardized_addrs:
-            standardized_addrs.append(fixed)
-
-    if standardized_addrs:
-        fields["addresses"] = list(dict.fromkeys(standardized_addrs))
-    if matched_provinces:
-        fields["provinces"] = matched_provinces
-
-    # 7. Vị trí hình học (Spatial Heuristics) nếu có bounding boxes
-    if boxes and img_shape and img_shape[0] > 0 and img_shape[1] > 0:
-        img_h, img_w = img_shape[:2]
-
-        top_lines = []
-        middle_lines = []
-        bottom_lines = []
-
-        for b in boxes:
-            y_mid = b.bbox[1] + (b.bbox[3] / 2.0)
-            y_rel = y_mid / float(img_h)
-
-            if y_rel < 0.35:
-                top_lines.append(b)
-            elif y_rel > 0.70:
-                bottom_lines.append(b)
-            else:
-                middle_lines.append(b)
-
-        # Vị trí góc trên: Tên người nhận / Khách hàng
-        for b in top_lines:
-            t = b.text.strip()
-            m_name = re.search(r'(?:Họ\s*và\s*tên|Tên\s*khách\s*hàng|Người\s*nhận|Người\s*mua)[:\s]*([^\n\r,;]{2,40})', t, re.IGNORECASE)
-            if m_name:
-                name_val = m_name.group(1).strip()
-                if len(name_val) > 2 and not any(c.isdigit() for c in name_val):
-                    fields["customer_name"].append(name_val)
-            elif 2 <= len(t.split()) <= 4 and t.istitle() and not any(c.isdigit() for c in t):
-                if not any(k in t.lower() for k in ("đơn hàng", "phiếu", "hóa đơn", "cửa hàng", "shop", "ngày")):
-                    fields["customer_name"].append(t)
-
-        # Vị trí giữa trang: Các dòng trong bảng đơn hàng (Tên sản phẩm, Số lượng, Đơn giá)
-        for b in middle_lines:
-            t = b.text.strip()
-            m_prod = re.search(r'([A-Za-z0-9\sàáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđĐ_-]{3,35})\s*(?:x|SL|Số\s*lượng)?\s*[:\s]*(\d+)\s*[:\s]*([0-9.,]+\s*(?:k|đ|vnd|vnđ)?)', t, re.IGNORECASE)
-            if m_prod:
-                fields["products"].append({
-                    "name": m_prod.group(1).strip(),
-                    "quantity": m_prod.group(2).strip(),
-                    "price": m_prod.group(3).strip(),
-                })
-            elif any(k in t.lower() for k in ("áo", "quần", "váy", "giày", "dép", "kem", "sách", "nạp mực", "máy in", "hộp", "bộ", "combo")):
-                fields["products"].append({"name": t, "raw": t})
-
-        # Vị trí góc dưới: Tổng tiền thanh toán
-        for b in bottom_lines:
-            t = b.text.strip()
-            m_tot = re.search(r'(?:Tổng|Thành\s*tiền|Thanh\s*toán|Tiền\s*thu|COD)[:\s]*([0-9.,]+\s*(?:k|VND|VNĐ|đ|đồng)?)', t, re.IGNORECASE)
-            if m_tot and m_tot.group(1).strip() not in fields["amounts"]:
-                fields["amounts"].insert(0, m_tot.group(1).strip())
-
-    if fields["customer_name"]:
-        fields["customer_name"] = list(dict.fromkeys(fields["customer_name"]))
-
-    return fields
+def extract_structured_fields(*args, **kwargs) -> Dict[str, Any]:
+    """Hàm giữ tương thích ngược, trả về dict rỗng (đã bỏ trích xuất cấu trúc)."""
+    return {}
 
 
-def format_structured_order_summary(fields: Dict[str, Any]) -> str:
-    """Tạo bảng tóm tắt thông tin bóc tách cấu trúc của đơn hàng."""
-    if not fields:
-        return ""
-
-    has_data = any(fields.get(k) for k in ("customer_name", "phones", "addresses", "provinces", "products", "amounts"))
-    if not has_data:
-        return ""
-
-    lines = []
-    lines.append("=" * 55)
-    lines.append("📋 KẾT QUẢ BÓC TÁCH CẤU TRÚC ĐƠN HÀNG (OFFLINE AI)")
-    lines.append("=" * 55)
-
-    if fields.get("customer_name"):
-        lines.append(f"👤 Khách hàng: {', '.join(fields['customer_name'])}")
-
-    if fields.get("phones"):
-        lines.append(f"📞 Số điện thoại: {', '.join(fields['phones'])}")
-
-    if fields.get("addresses"):
-        lines.append(f"🏠 Địa chỉ: {', '.join(fields['addresses'])}")
-
-    if fields.get("provinces"):
-        lines.append(f"📍 Tỉnh / Thành phố: {', '.join(fields['provinces'])}")
-
-    if fields.get("products"):
-        lines.append("📦 Sản phẩm / Hàng hóa:")
-        for p in fields["products"]:
-            if isinstance(p, dict) and "quantity" in p and "price" in p:
-                lines.append(f"   • {p['name']} | SL: {p['quantity']} | Giá: {p['price']}")
-            elif isinstance(p, dict) and "name" in p:
-                lines.append(f"   • {p['name']}")
-            else:
-                lines.append(f"   • {str(p)}")
-
-    if fields.get("amounts"):
-        lines.append(f"💰 Tổng tiền thanh toán: {fields['amounts'][0]}")
-
-    if fields.get("dates"):
-        lines.append(f"🗓️ Ngày tháng: {', '.join(fields['dates'])}")
-
-    if fields.get("mst"):
-        lines.append(f"🏢 Mã số thuế (MST): {', '.join(fields['mst'])}")
-
-    if fields.get("cccd"):
-        lines.append(f"🪪 CCCD/CMND: {', '.join(fields['cccd'])}")
-
-    lines.append("=" * 55)
-    lines.append("")
-    return "\n".join(lines)
+def format_structured_order_summary(*args, **kwargs) -> str:
+    """Hàm giữ tương thích ngược, trả về chuỗi rỗng (đã bỏ trích xuất cấu trúc)."""
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -935,7 +447,6 @@ class OCREngine:
     def __init__(self):
         self._detector: Optional[PaddleOCRDetector] = None
         self._vietocr: Optional[VietOCREngine] = None
-        self._restorer: Optional[SmartVietnameseRestorer] = None
         self._engine_mode: str = "offline"
 
     @classmethod
@@ -963,12 +474,6 @@ class OCREngine:
     def _init_vietocr(self):
         if self._vietocr is None:
             self._vietocr = VietOCREngine.get_instance()
-
-    def _init_restorer(self):
-        if self._restorer is None:
-            base_dir = get_base_dir()
-            dict_path = os.path.join(base_dir, "core", "models", "viet_words.txt")
-            self._restorer = SmartVietnameseRestorer(dict_path)
 
     def recognize(
         self,
@@ -1089,10 +594,7 @@ class OCREngine:
                     ))
 
             total_time = round(time.time() - start_time, 2)
-            extracted_fields = extract_structured_fields(extracted_text, boxes=boxes, img_shape=(h, w))
-
-            summary_header = format_structured_order_summary(extracted_fields)
-            final_display_text = f"{summary_header}{extracted_text}" if summary_header else extracted_text
+            final_display_text = extracted_text
 
             if progress_callback:
                 progress_callback(10, 10, "Hoàn tất nhận diện!")
@@ -1103,7 +605,7 @@ class OCREngine:
                 elapse_time=total_time,
                 char_count=len(final_display_text),
                 word_count=len(final_display_text.split()),
-                extracted_fields=extracted_fields
+                extracted_fields={}
             )
 
         except Exception as e:
@@ -1122,15 +624,13 @@ class OCREngine:
         progress_callback: Optional[Callable[[int, int, str], None]] = None
     ) -> OCRResult:
         """
-        Quy trình Offline toàn diện 4 Bước:
-        - Bước 1: Tiền xử lý ảnh (Pre-processing): Grayscale, Deskew (0°), Adaptive Thresholding & CLAHE.
+        Quy trình Offline toàn diện 3 Bước:
+        - Bước 1: Tiền xử lý ảnh (Pre-processing): Grayscale, Deskew (0°), CLAHE tăng tương phản.
         - Bước 2: Định vị vùng chữ với PaddleOCR DBNet (PP-OCRv4 Det) & Cắt ảnh (Crop).
         - Bước 3: Nhận diện chữ tiếng Việt bằng VietOCR (vgg_transformer).
-        - Bước 4: Hậu xử lý dữ liệu (Spatial Heuristic, Regex số điện thoại, Dictionary Matching 63 tỉnh thành).
         """
         self._init_detector()
         self._init_vietocr()
-        self._init_restorer()
 
         # BƯỚC 1: TIỀN XỬ LÝ ẢNH
         if progress_callback:
@@ -1139,7 +639,7 @@ class OCREngine:
         deskewed_color, thresh_img, skew_angle = preprocess_order_image(
             image,
             deskew=True,
-            apply_adaptive_thresh=True
+            apply_adaptive_thresh=False
         )
         prep_img = preprocess_for_ocr(deskewed_color, deskew=False, denoise=True, enhance_contrast=True)
 
@@ -1178,13 +678,12 @@ class OCREngine:
 
         for idx, (crop, bbox, poly) in enumerate(cropped_items):
             if progress_callback and total_crops > 0:
-                step_pct = 4 + int((idx / total_crops) * 4)
+                step_pct = 4 + int((idx / total_crops) * 5)
                 progress_callback(step_pct, 10, f"Bước 3: VietOCR đang nhận diện tiếng Việt ({idx + 1}/{total_crops} dòng)...")
 
             text = self._vietocr.predict_image(crop)
             if text:
                 text = unicodedata.normalize("NFC", text.strip())
-                text = self._restorer.restore_line(text)
 
                 boxes.append(OCRBox(
                     polygon=poly,
@@ -1202,29 +701,12 @@ class OCREngine:
 
         sorted_boxes = self._sort_reading_order(boxes)
         reconstructed_lines = self._reconstruct_lines(sorted_boxes)
-        raw_full_text = "\n".join(reconstructed_lines).strip()
-
-        # BƯỚC 4: HẬU XỬ LÝ DỮ LIỆU & BÓC TÁCH CẤU TRÚC
-        if progress_callback:
-            progress_callback(9, 10, "Bước 4: Hậu xử lý dữ liệu (Spatial Heuristic, Regex SĐT, Từ điển 63 tỉnh thành)...")
-
-        img_h, img_w = deskewed_color.shape[:2]
-        extracted_fields = extract_structured_fields(
-            raw_full_text,
-            boxes=sorted_boxes,
-            img_shape=(img_h, img_w)
-        )
-
-        summary_header = format_structured_order_summary(extracted_fields)
-        if summary_header:
-            final_full_text = f"{summary_header}\n--- NỘI DUNG VĂN BẢN CHI TIẾT ---\n{raw_full_text}"
-        else:
-            final_full_text = raw_full_text
+        final_full_text = "\n".join(reconstructed_lines).strip()
 
         total_time = round(time.time() - start_time, 2)
 
         if progress_callback:
-            progress_callback(10, 10, "Hoàn tất nhận diện đơn hàng thành công!")
+            progress_callback(10, 10, "Hoàn tất nhận diện tài liệu thành công!")
 
         return OCRResult(
             full_text=final_full_text,
@@ -1232,7 +714,7 @@ class OCREngine:
             elapse_time=total_time,
             char_count=len(final_full_text),
             word_count=len(final_full_text.split()),
-            extracted_fields=extracted_fields
+            extracted_fields={}
         )
 
     def _sort_reading_order(self, boxes: List[OCRBox]) -> List[OCRBox]:
