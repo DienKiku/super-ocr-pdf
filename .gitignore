@@ -44,6 +44,7 @@ output_*.pdf
 # Large deep learning weights (>100MB exceeds GitHub limit)
 *.pth
 weights/*.pth
+weights/ch_PP-OCRv4_det_infer.onnx
 *.pdparams
 *.pdopt
 *.tar
@@ -54,3 +55,6 @@ PaddleOCR/
 pretrained/
 train_data/
 tuning_data/
+cinnamon_data.zip
+cinnamon_dataset/
+train_data_cinnamon/

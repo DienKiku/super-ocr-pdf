@@ -1,4 +1,4 @@
-﻿# Thư Mục Trọng Số Mô Hình AI (Offline Weights)
+# Thư Mục Trọng Số Mô Hình AI (Offline Weights)
 
 Thư mục này chứa các trọng số mô hình trí tuệ nhân tạo phục vụ nhận diện chữ và văn bản tiếng Việt hoàn toàn Offline (không cần kết nối Internet).
 
@@ -8,6 +8,7 @@ Thư mục này chứa các trọng số mô hình trí tuệ nhân tạo phục
 | :--- | :--- | :--- | :--- |
 | **ch_PP-OCRv4_det_infer.onnx** | 4.74 MB | Định vị khung bao văn bản (Text Detection) với độ chính xác cao theo cấu trúc DBNet v4 | PaddleOCR chính thức (v4) |
 | **rec_custom_v4_infer/** | 7.68 MB | Nhận diện ký tự tiếng Việt đã được tinh chỉnh (Fine-tuned) trên bộ dữ liệu thực tế (tuning_data) | Xuất từ quy trình PaddleOCR fine-tuning |
+| **rec_cinnamon_v4_infer/** | 7.62 MB | Nhận diện chữ viết tay địa chỉ tiếng Việt (Fine-tuned trên Cinnamon AI Handwriting Dataset) | Xuất từ quy trình PaddleOCR fine-tuning (TomHuynhSG dataset) |
 | **vgg_transformer.pth** | 151.8 MB | Mô hình Transformer nhận diện chữ viết tay và tiếng Việt tự nhiên | VietOCR (VGG + Transformer) |
 
 ---

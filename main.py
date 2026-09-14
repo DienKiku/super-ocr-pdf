@@ -1,7 +1,7 @@
 """
 Entry point for Super OCR & High-Res PDF Studio.
-Version: 3.0.0 (Fine-tuned Offline Vietnamese OCR & Standalone Studio)
-Updated: 2026-09-11 by Fami (fami_7006)
+Version: 3.0.1 (Integrated Cinnamon AI Vietnamese Handwriting OCR Model)
+Updated: 2026-09-14 by Fami (fami_7006)
 """
 
 import sys
