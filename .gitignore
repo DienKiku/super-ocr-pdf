@@ -61,3 +61,4 @@ train_data_cinnamon/
 vietocr_data/
 train_lmdb/
 valid_lmdb/
+backup_weights/

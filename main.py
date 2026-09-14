@@ -1,6 +1,6 @@
 """
 Entry point for Super OCR & High-Res PDF Studio.
-Version: 3.2.0 (Accurate Natural Vietnamese OCR & New App Icon)
+Version: 3.2.1 (Fine-Tuned Vietnamese Handwriting & Document OCR)
 Updated: 2026-09-14 by Fami (fami_7006)
 """
 

@@ -516,7 +516,7 @@ class MainWindow(QMainWindow):
 
     def _show_about(self):
         msg = (
-            "<h3>Super OCR & High-Res PDF Studio (v3.2.0)</h3>"
+            "<h3>Super OCR & High-Res PDF Studio (v3.2.1)</h3>"
             "<p><b>Phần mềm phục chế làm nét văn bản, quét OCR và xuất PDF siêu phân giải</b></p>"
             "<ul>"
             "<li><b>Làm nét chữ:</b> Unsharp Masking, CLAHE, lọc viền chi tiết, khử nhòe mờ</li>"
