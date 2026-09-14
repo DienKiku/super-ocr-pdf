@@ -58,3 +58,6 @@ tuning_data/
 cinnamon_data.zip
 cinnamon_dataset/
 train_data_cinnamon/
+vietocr_data/
+train_lmdb/
+valid_lmdb/
