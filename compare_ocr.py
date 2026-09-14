@@ -7,7 +7,10 @@ Compare OCR recognition results between:
 import os
 import sys
 import glob
+import warnings
 from PIL import Image
+
+warnings.filterwarnings('ignore', message='.*enable_nested_tensor.*')
 
 if sys.stdout is not None:
     try:

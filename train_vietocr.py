@@ -1,14 +1,19 @@
 """
 Fine-tuning VietOCR vgg_transformer on Vietnamese handwriting and invoice documents.
-Uses unified dataset from Cinnamon AI and invoice/order crops.
-Optimized for CPU training with batch_size=4 and CosineAnnealingLR.
+Deep Fine-Tuning Run: 1,000 iterations with batch_size=4, lr=1.8e-4, 10 CPU threads.
+Completely suppresses PyTorch 2.x nested_tensor warnings and manages CPU memory.
 """
 
 import os
 import sys
 import time
 import shutil
+import warnings
+import gc
 import numpy as np
+
+# Suppress PyTorch 2.x nested_tensor UserWarning cleanly
+warnings.filterwarnings('ignore', message='.*enable_nested_tensor.*')
 
 # Force UTF-8 console output on Windows
 if sys.stdout is not None:
@@ -35,6 +40,8 @@ def _safe_fromstring(string, dtype=float, count=-1, sep=''):
 np.fromstring = _safe_fromstring
 
 import torch
+torch.set_num_threads(10)
+
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from vietocr.tool.config import Cfg
@@ -59,10 +66,43 @@ class SafeLogger:
 logger_mod.Logger = SafeLogger
 
 
+# Custom Trainer with explicit memory cleanup on CPU
+class MemorySafeTrainer(Trainer):
+    def step(self, batch):
+        self.model.train()
+
+        batch = self.batch_to_device(batch)
+        img = batch['img']
+        tgt_input = batch['tgt_input']
+        tgt_output = batch['tgt_output']
+        tgt_padding_mask = batch['tgt_padding_mask']
+
+        outputs = self.model(img, tgt_input, tgt_key_padding_mask=tgt_padding_mask)
+        outputs = outputs.view(-1, outputs.size(2))
+        tgt_output = tgt_output.view(-1)
+
+        loss = self.criterion(outputs, tgt_output)
+
+        self.optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+
+        self.optimizer.step()
+        self.scheduler.step()
+
+        loss_item = loss.item()
+
+        # Explicitly release memory
+        del outputs, loss, batch, img, tgt_input, tgt_output, tgt_padding_mask
+
+        return loss_item
+
+
 def main():
-    print("=" * 65)
-    print("BAT DAU FINE-TUNING VIETOCR CHO TIENG VIET & CHU VIET TAY")
-    print("=" * 65)
+    print("=" * 70)
+    print("BAT DAU HUAN LUYEN CHUYEN SAU (DEEP FINE-TUNING) VIETOCR")
+    print("=" * 70)
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     weights_dir = os.path.join(base_dir, "weights")
@@ -77,23 +117,24 @@ def main():
     logger = SafeLogger(log_file)
 
     if not os.path.exists(pretrained_path):
-        print(f"[LOI] Khong tim thay file trong so goc tai: {pretrained_path}")
+        print(f"[LOI] Khong tim thay file trong so tai: {pretrained_path}")
         sys.exit(1)
 
-    # 1. Backup file trọng số gốc nếu chưa có
+    # 1. Đảm bảo bản backup gốc luôn an toàn
     if not os.path.exists(backup_path):
-        print(f"[BACKUP] Dang sao luu trong so goc sang: {backup_path}")
+        print(f"[BACKUP] Dang sao luu trong so sang: {backup_path}")
         shutil.copyfile(pretrained_path, backup_path)
     else:
-        print(f"[BACKUP] Ban sao luu goc da ton tai: {backup_path}")
+        print(f"[BACKUP] Ban sao luu goc san sang: {backup_path}")
 
-    # 2. Cấu hình VietOCR vgg_transformer
-    total_iters = 400
+    # 2. Cấu hình huấn luyện chuyên sâu
+    total_iters = 1000
     batch_size = 4
-    print_every = 20
-    valid_every = 100
+    print_every = 25
+    valid_every = 200
     val_sample_size = 30
-    lr = 5e-5
+    lr = 1.8e-4
+    eta_min = 2.0e-5
 
     config = Cfg.load_config_from_name('vgg_transformer')
     config['cnn']['pretrained'] = False
@@ -116,25 +157,24 @@ def main():
     config['dataloader']['pin_memory'] = False
     config['aug']['image_aug'] = False
 
-    print(f"Thiet bi: CPU (batch_size={batch_size})")
-    print(f"Tong so buoc (Iterations): {total_iters}")
-    print(f"Learning rate: {lr} (CosineAnnealing to {lr/10})")
-    print(f"Luu trong so tot nhat vao: {finetuned_path}")
+    print(f"Thiet bi: CPU (10 threads | batch_size={batch_size})")
+    print(f"Tong so buoc (Iterations): {total_iters} (~{(total_iters * batch_size) / 3381:.1f} Epochs)")
+    print(f"Learning rate: {lr:.1e} (CosineAnnealing giam dan ve {eta_min:.1e})")
+    print(f"File xuat mo hinh: {finetuned_path}")
 
-    # 3. Khởi tạo Trainer và nạp trọng số gốc
-    print("\nDang khoi tao Trainer va nap trong so goc...")
-    trainer = Trainer(config, pretrained=False)
+    # 3. Khởi tạo MemorySafeTrainer và nạp trọng số
+    print("\nDang khoi tao Trainer va nap trong so...")
+    trainer = MemorySafeTrainer(config, pretrained=False)
     trainer.load_weights(pretrained_path)
 
-    # Tùy biến optimizer và scheduler để fine-tuning ổn định trên CPU
     trainer.optimizer = AdamW(trainer.model.parameters(), lr=lr, betas=(0.9, 0.98), eps=1e-09, weight_decay=1e-4)
-    trainer.scheduler = CosineAnnealingLR(trainer.optimizer, T_max=total_iters, eta_min=lr/10)
+    trainer.scheduler = CosineAnnealingLR(trainer.optimizer, T_max=total_iters, eta_min=eta_min)
 
-    # 4. Đánh giá ban đầu (Baseline)
-    print("\nDang danh gia Baseline truoc khi fine-tuning...")
+    # 4. Đánh giá Baseline trước khi chạy
+    print("\nDang danh gia trang thai ban dau...")
     base_val_loss = trainer.validate()
     base_seq_acc, base_char_acc = trainer.precision(sample=val_sample_size)
-    init_msg = f"[BASELINE] val_loss: {base_val_loss:.4f} | seq_acc: {base_seq_acc*100:.2f}% | char_acc: {base_char_acc*100:.2f}%"
+    init_msg = f"[BAT DAU] val_loss: {base_val_loss:.4f} | seq_acc: {base_seq_acc*100:.2f}% | char_acc: {base_char_acc*100:.2f}%"
     print(init_msg)
     logger.log(init_msg)
 
@@ -143,9 +183,9 @@ def main():
     saved_best = False
 
     # 5. Huấn luyện (Training Loop)
-    print("\n" + "=" * 65)
-    print("DANG FINE-TUNING... THEO DOI TIEN TRINH:")
-    print("=" * 65)
+    print("\n" + "=" * 70)
+    print("TIEN TRINH HUAN LUYEN (TRAINING PROGRESS):")
+    print("=" * 70)
 
     data_iter = iter(trainer.train_gen)
     running_loss = 0.0
@@ -159,8 +199,15 @@ def main():
             data_iter = iter(trainer.train_gen)
             batch = next(data_iter)
 
-        loss = trainer.step(batch)
-        running_loss += loss
+        try:
+            loss = trainer.step(batch)
+            running_loss += loss
+        except RuntimeError as e:
+            if "DefaultCPUAllocator" in str(e) or "not enough memory" in str(e) or "out of memory" in str(e):
+                print(f"[Canh bao] Bo qua lo qua lon tai buoc {step} de bao toan bo nho CPU: {e}")
+                gc.collect()
+                continue
+            raise e
 
         if step % print_every == 0:
             avg_loss = running_loss / print_every
@@ -172,6 +219,10 @@ def main():
             running_loss = 0.0
             t_chunk = time.time()
 
+            # Periodic garbage collection every 50 steps
+            if step % 50 == 0:
+                gc.collect()
+
         if step % valid_every == 0:
             print(f"--> Dang danh gia tai buoc {step}...")
             val_loss = trainer.validate()
@@ -180,7 +231,6 @@ def main():
             print(val_msg)
             logger.log(val_msg)
 
-            # Lưu nếu char_acc cải thiện hoặc val_loss giảm đáng kể
             if acc_char >= best_char_acc or val_loss < best_loss:
                 best_char_acc = max(best_char_acc, acc_char)
                 best_loss = min(best_loss, val_loss)
@@ -200,7 +250,7 @@ def main():
     print(done_msg)
     logger.log(done_msg)
     logger.close()
-    print("=" * 65)
+    print("=" * 70)
 
 
 if __name__ == "__main__":

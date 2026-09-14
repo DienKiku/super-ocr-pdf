@@ -15,9 +15,12 @@ import time
 import re
 import difflib
 import unicodedata
+import warnings
 import cv2
 import numpy as np
 from PIL import Image
+
+warnings.filterwarnings('ignore', category=UserWarning, module='torch.nn.modules.transformer')
 
 
 @dataclass

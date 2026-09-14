@@ -11,6 +11,9 @@ import numpy as np
 import cv2
 import pymupdf
 
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='torch.nn.modules.transformer')
+
 # Add project root to sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -296,4 +299,4 @@ class TestSuperOCRPDF(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(warnings='ignore')
