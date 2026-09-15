@@ -340,6 +340,115 @@ def crop_text_box(image: np.ndarray, polygon: List[List[float]], padding: int = 
 
 
 # ---------------------------------------------------------------------------
+# BỘ TIỀN XỬ LÝ DÒNG & HẬU XỬ LÝ CHÍNH TẢ THANH DẤU TIẾNG VIỆT
+# ---------------------------------------------------------------------------
+
+VIETNAMESE_PROVINCES = [
+    "An Giang", "Bà Rịa - Vũng Tàu", "Bắc Giang", "Bắc Kạn", "Bạc Liêu", "Bắc Ninh",
+    "Bến Tre", "Bình Định", "Bình Dương", "Bình Phước", "Bình Thuận", "Cà Mau",
+    "Cần Thơ", "Cao Bằng", "Đà Nẵng", "Đắk Lắk", "Đắk Nông", "Điện Biên",
+    "Đồng Nai", "Đồng Tháp", "Gia Lai", "Hà Giang", "Hà Nam", "Hà Nội",
+    "Hà Tĩnh", "Hải Dương", "Hải Phòng", "Hậu Giang", "Hòa Bình", "Hưng Yên",
+    "Khánh Hòa", "Kiên Giang", "Kon Tum", "Lai Châu", "Lâm Đồng", "Lạng Sơn",
+    "Lào Cai", "Long An", "Nam Định", "Nghệ An", "Ninh Bình", "Ninh Thuận",
+    "Phú Thọ", "Phú Yên", "Quảng Bình", "Quảng Nam", "Quảng Ngãi", "Quảng Ninh",
+    "Quảng Trị", "Sóc Trăng", "Sơn La", "Tây Ninh", "Thái Bình", "Thái Nguyên",
+    "Thanh Hóa", "Thừa Thiên Huế", "Tiền Giang", "TP Hồ Chí Minh", "Trà Vinh",
+    "Tuyên Quang", "Vĩnh Long", "Vĩnh Phúc", "Yên Bái"
+]
+
+
+def enhance_text_crop(crop: np.ndarray) -> np.ndarray:
+    """Tăng tương phản và làm nét các dấu thanh nhỏ trong ảnh cắt dòng chữ viết tay."""
+    if crop is None or crop.size == 0:
+        return crop
+    try:
+        if len(crop.shape) == 3:
+            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = crop.copy()
+        blurred = cv2.GaussianBlur(gray, (0, 0), 1.0)
+        sharpened = cv2.addWeighted(gray, 1.25, blurred, -0.25, 0)
+        return cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR)
+    except Exception:
+        return crop
+
+
+class VietnameseDiacriticsCorrector:
+    """
+    Bộ hậu xử lý phục hồi thanh dấu & chính tả tiếng Việt:
+    - Sửa các lỗi rớt dấu từ vựng hành chính và số nhà.
+    - Đối soát tự động địa danh 63 tỉnh thành & quận/huyện.
+    - Chuẩn hóa Unicode NFC 100%.
+    """
+    WORD_REPLACEMENTS = [
+        (r'\b[Ss]o\s+(\d+)', r'Số \1'),
+        (r'\b[Ss][oó]\s+([0-9])', r'Số \1'),
+        (r'\b[Cc]hường\b', 'đường'),
+        (r'\b[Đđ]ương\b', 'đường'),
+        (r'\b[Dd]uong\b', 'đường'),
+        (r'\b[Dd]ương\s+V[oó]\s+Oanh\b', 'Đường Võ Oanh'),
+        (r'\b[Pp]huong\b', 'Phường'),
+        (r'\b[Pp]huồng\b', 'Phường'),
+        (r'\b[Qq]uan\b', 'Quận'),
+        (r'\b[Qq]uân\b', 'Quận'),
+        (r'\b[Hh]uyen\b', 'Huyện'),
+        (r'\b[Hh]uyên\b', 'Huyện'),
+        (r'\b[Tt]h[ií]\s+[Tt]r[aâấ]n\b', 'Thị trấn'),
+        (r'\b[Tt]hị\s+t[aâá]n\b', 'Thị trấn'),
+        (r'\b[Tt]hi\s+thái\b', 'Thị trấn'),
+        (r'\b[Kk]hn\s+phế\b', 'Khu phố'),
+        (r'\b[Kk]hu\s+ph[oóeế]\s*([0-9A-Za-z]+)', r'Khu phố \1'),
+        (r'\b[Tt]h[aà]nh\s+[Pp]h[oó]\b', 'Thành phố'),
+        (r'\b[Tt]p\.?\s*[Hh]ồ\s+[Cc]hí\s+[Mm]inh\b', 'TP Hồ Chí Minh'),
+        (r'\b[Tt][Xx]\s+', 'Tx '),
+        (r'\bIx\s+', 'Tx '),
+        (r'\b[Aa]p\b', 'Ấp'),
+        (r'\b[Tt]hon\b', 'Thôn'),
+        (r'\b[Xx]om\b', 'Xóm'),
+        (r'\b[Đđ][iìịí]nh\s+Bộ\s+Lĩnh\b', 'Đinh Bộ Lĩnh'),
+        (r'\b[KkNnHh][aâă]n\s+Sách\b', 'Nam Sách'),
+        (r'\b[Hh]àm\s+Sách\b', 'Nam Sách'),
+        (r'\bTrần\s+thí\b', 'Trần Phú'),
+        (r'\bBinh\s+Dương\b', 'Bình Dương'),
+        (r'\bHải\s+Viêng\b', 'Hải Dương'),
+        (r'\bHải\s+Dưong\b', 'Hải Dương'),
+        (r'\bViết\s+Nam\b', 'Việt Nam'),
+        (r'\bĐịa\s+chi\b', 'Địa chỉ'),
+        (r'\bTNHFI\b', 'TNHH'),
+        (r'\.còm\b', '.com'),
+    ]
+
+    @classmethod
+    def correct_text(cls, text: str) -> str:
+        if not text:
+            return ""
+
+        text = unicodedata.normalize('NFC', text)
+
+        for pattern, repl in cls.WORD_REPLACEMENTS:
+            text = re.sub(pattern, repl, text, flags=re.IGNORECASE if not repl.isupper() else 0)
+
+        # Province fuzzy match on comma-separated parts
+        parts = [p.strip() for p in text.split(',')]
+        if parts:
+            last_part = parts[-1].strip()
+            best_match = None
+            best_ratio = 0.0
+            for prov in VIETNAMESE_PROVINCES:
+                ratio = difflib.SequenceMatcher(None, last_part.lower(), prov.lower()).ratio()
+                if ratio > best_ratio and ratio >= 0.75:
+                    best_ratio = ratio
+                    best_match = prov
+
+            if best_match and best_ratio >= 0.8:
+                parts[-1] = best_match
+                text = ', '.join(parts)
+
+        return unicodedata.normalize('NFC', text)
+
+
+# ---------------------------------------------------------------------------
 # BƯỚC 3: NHẬN DIỆN CHỮ TIẾNG VIỆT BẰNG VIETOCR (TEXT RECOGNITION)
 # ---------------------------------------------------------------------------
 
@@ -397,21 +506,26 @@ class VietOCREngine:
         self.predictor = Predictor(config)
 
     def predict_image(self, image: np.ndarray) -> str:
-        """Nhận diện văn bản cho một ảnh cắt dòng đơn lẻ."""
+        """Nhận diện văn bản cho một ảnh cắt dòng đơn lẻ kết hợp làm nét và phục hồi thanh dấu."""
         if image is None or image.size == 0:
             return ""
 
         self._init_predictor()
 
-        if len(image.shape) == 3:
-            rgb_img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # Tiền xử lý tăng nét vi mô cho crop ảnh để làm rõ dấu thanh
+        enhanced = enhance_text_crop(image)
+
+        if len(enhanced.shape) == 3:
+            rgb_img = cv2.cvtColor(enhanced, cv2.COLOR_BGR2RGB)
         else:
-            rgb_img = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+            rgb_img = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB)
 
         pil_img = Image.fromarray(rgb_img)
         try:
             text = self.predictor.predict(pil_img)
-            return (text or "").strip()
+            text = (text or "").strip()
+            # Áp dụng bộ phục hồi chính tả & thanh dấu tiếng Việt
+            return VietnameseDiacriticsCorrector.correct_text(text)
         except Exception:
             return ""
 

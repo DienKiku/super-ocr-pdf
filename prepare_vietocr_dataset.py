@@ -1,11 +1,14 @@
 """
 Prepare and format dataset for VietOCR fine-tuning.
-Combines invoice/order text crops with Vietnamese handwriting crops.
+Combines invoice/order text crops with 100% Vietnamese handwriting crops from Cinnamon AI.
+Applies 2x oversampling to handwriting to strongly bias model toward handwriting accuracy.
 Builds LMDB datasets compatible with NumPy 2.x and VietOCR.
 """
 
 import os
 import sys
+import json
+import shutil
 import random
 import unicodedata
 import cv2
@@ -35,73 +38,63 @@ def prepare_dataset():
     out_dir = os.path.join(base_dir, "vietocr_data")
     os.makedirs(out_dir, exist_ok=True)
 
-    samples = []
+    invoice_samples = []
 
     # 1. Load order / invoice crops from train_data/
-    train_data_txt = os.path.join(base_dir, "train_data", "train.txt")
-    if os.path.exists(train_data_txt):
-        with open(train_data_txt, "r", encoding="utf-8") as f:
-            for line in f:
-                parts = line.strip().split("\t")
-                if len(parts) >= 2:
-                    rel_img, text = parts[0], parts[1]
-                    img_path = os.path.join(base_dir, "train_data", rel_img)
-                    text_clean = unicodedata.normalize("NFC", text.strip())
-                    if os.path.exists(img_path) and len(text_clean) > 0:
-                        samples.append((img_path, text_clean))
+    for fname in ["train.txt", "val.txt"]:
+        txt_path = os.path.join(base_dir, "train_data", fname)
+        if os.path.exists(txt_path):
+            with open(txt_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    parts = line.strip().split("\t")
+                    if len(parts) >= 2:
+                        rel_img, text = parts[0], parts[1]
+                        img_path = os.path.join(base_dir, "train_data", rel_img)
+                        text_clean = unicodedata.normalize("NFC", text.strip())
+                        if os.path.exists(img_path) and len(text_clean) > 0:
+                            invoice_samples.append((img_path, text_clean))
 
-    val_data_txt = os.path.join(base_dir, "train_data", "val.txt")
-    if os.path.exists(val_data_txt):
-        with open(val_data_txt, "r", encoding="utf-8") as f:
-            for line in f:
-                parts = line.strip().split("\t")
-                if len(parts) >= 2:
-                    rel_img, text = parts[0], parts[1]
-                    img_path = os.path.join(base_dir, "train_data", rel_img)
-                    text_clean = unicodedata.normalize("NFC", text.strip())
-                    if os.path.exists(img_path) and len(text_clean) > 0:
-                        samples.append((img_path, text_clean))
+    print(f"1. Loaded {len(invoice_samples)} order/invoice samples.")
 
-    print(f"Loaded {len(samples)} order/invoice samples.")
-
-    # 2. Load Vietnamese handwriting samples from cinnamon_dataset/
-    cinnamon_txt = os.path.join(base_dir, "train_data_cinnamon", "train.txt")
+    # 2. Load 100% of Vietnamese handwriting samples directly from labels.json
+    handwriting_samples = []
+    labels_json_path = os.path.join(base_dir, "cinnamon_dataset", "vn_handwritten_images", "labels.json")
     cinnamon_img_dir = os.path.join(base_dir, "cinnamon_dataset", "vn_handwritten_images", "data")
-    cinnamon_count = 0
-    if os.path.exists(cinnamon_txt) and os.path.exists(cinnamon_img_dir):
-        with open(cinnamon_txt, "r", encoding="utf-8") as f:
-            for line in f:
-                parts = line.strip().split("\t")
-                if len(parts) >= 2:
-                    rel_img, text = parts[0], parts[1]
-                    img_path = os.path.join(cinnamon_img_dir, rel_img)
-                    text_clean = unicodedata.normalize("NFC", text.strip())
-                    if os.path.exists(img_path) and len(text_clean) > 0:
-                        samples.append((img_path, text_clean))
-                        cinnamon_count += 1
 
-    print(f"Loaded {cinnamon_count} handwriting samples.")
-    print(f"Total raw samples: {len(samples)}")
+    if os.path.exists(labels_json_path) and os.path.exists(cinnamon_img_dir):
+        with open(labels_json_path, "r", encoding="utf-8") as f:
+            labels_dict = json.load(f)
 
-    # Filter invalid images
+        for rel_img, text in labels_dict.items():
+            img_path = os.path.join(cinnamon_img_dir, rel_img)
+            text_clean = unicodedata.normalize("NFC", text.strip())
+            if os.path.exists(img_path) and len(text_clean) > 0:
+                handwriting_samples.append((img_path, text_clean))
+
+    print(f"2. Loaded {len(handwriting_samples)} handwriting samples from Cinnamon labels.json (100% complete).")
+
+    # 3. Oversample handwriting 2x to balance handwriting vs printed text
+    print(f"3. Applying 2x oversampling to handwriting ({len(handwriting_samples)} -> {len(handwriting_samples) * 2})...")
+    combined_samples = invoice_samples + (handwriting_samples * 2)
+
+    # 4. Filter invalid or damaged images
     valid_samples = []
-    for img_path, label in samples:
+    for img_path, label in combined_samples:
         try:
-            # Quick shape check
             h, w = cv2.imread(img_path).shape[:2]
             if h >= 8 and w >= 8 and len(label) <= 120:
                 valid_samples.append((img_path, label))
         except Exception:
             continue
 
-    print(f"Total validated samples: {len(valid_samples)}")
+    print(f"Total validated balanced samples: {len(valid_samples)}")
 
     # Shuffle with fixed seed
     random.seed(42)
     random.shuffle(valid_samples)
 
-    # Split: 90% train, 10% val
-    split_idx = int(len(valid_samples) * 0.9)
+    # Split: 92% train, 8% val
+    split_idx = int(len(valid_samples) * 0.92)
     train_samples = valid_samples[:split_idx]
     val_samples = valid_samples[split_idx:]
 
@@ -119,23 +112,28 @@ def prepare_dataset():
     print(f"Train samples: {len(train_samples)} -> {train_txt_path}")
     print(f"Validation samples: {len(val_samples)} -> {val_txt_path}")
 
-    # Build LMDB databases
-    train_lmdb = os.path.join(out_dir, "train_lmdb")
-    val_lmdb = os.path.join(out_dir, "val_lmdb")
+    # Remove old LMDBs to force rebuild
+    for folder in [
+        os.path.join(out_dir, "train_lmdb"),
+        os.path.join(out_dir, "val_lmdb"),
+        os.path.join(base_dir, "train_lmdb"),
+        os.path.join(base_dir, "valid_lmdb")
+    ]:
+        if os.path.exists(folder):
+            print(f"Removing old LMDB folder: {folder}")
+            shutil.rmtree(folder, ignore_errors=True)
 
-    if not os.path.exists(train_lmdb):
-        print("Creating train LMDB...")
-        createDataset(train_lmdb, "", train_txt_path)
-    else:
-        print(f"train LMDB already exists: {train_lmdb}")
+    # Build fresh LMDB databases
+    train_lmdb = os.path.join(base_dir, "train_lmdb")
+    val_lmdb = os.path.join(base_dir, "valid_lmdb")
 
-    if not os.path.exists(val_lmdb):
-        print("Creating val LMDB...")
-        createDataset(val_lmdb, "", val_txt_path)
-    else:
-        print(f"val LMDB already exists: {val_lmdb}")
+    print("Creating fresh train LMDB...")
+    createDataset(train_lmdb, "", train_txt_path)
 
-    print("Dataset preparation complete!")
+    print("Creating fresh val LMDB...")
+    createDataset(val_lmdb, "", val_txt_path)
+
+    print("Balanced dataset preparation complete!")
 
 
 if __name__ == "__main__":

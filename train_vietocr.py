@@ -39,8 +39,9 @@ def _safe_fromstring(string, dtype=float, count=-1, sep=''):
     return _orig_fromstring(string, dtype=dtype, count=count, sep=sep)
 np.fromstring = _safe_fromstring
 
+import traceback
 import torch
-torch.set_num_threads(10)
+torch.set_num_threads(4)
 
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -128,13 +129,13 @@ def main():
         print(f"[BACKUP] Ban sao luu goc san sang: {backup_path}")
 
     # 2. Cấu hình huấn luyện chuyên sâu
-    total_iters = 1000
+    total_iters = 400
     batch_size = 4
     print_every = 25
-    valid_every = 200
+    valid_every = 100
     val_sample_size = 30
-    lr = 1.8e-4
-    eta_min = 2.0e-5
+    lr = 1.5e-4
+    eta_min = 1.5e-5
 
     config = Cfg.load_config_from_name('vgg_transformer')
     config['cnn']['pretrained'] = False
@@ -157,7 +158,7 @@ def main():
     config['dataloader']['pin_memory'] = False
     config['aug']['image_aug'] = False
 
-    print(f"Thiet bi: CPU (10 threads | batch_size={batch_size})")
+    print(f"Thiet bi: CPU (4 threads | batch_size={batch_size})")
     print(f"Tong so buoc (Iterations): {total_iters} (~{(total_iters * batch_size) / 3381:.1f} Epochs)")
     print(f"Learning rate: {lr:.1e} (CosineAnnealing giam dan ve {eta_min:.1e})")
     print(f"File xuat mo hinh: {finetuned_path}")
@@ -219,9 +220,8 @@ def main():
             running_loss = 0.0
             t_chunk = time.time()
 
-            # Periodic garbage collection every 50 steps
-            if step % 50 == 0:
-                gc.collect()
+            # Periodic garbage collection every 25 steps
+            gc.collect()
 
         if step % valid_every == 0:
             print(f"--> Dang danh gia tai buoc {step}...")
@@ -254,4 +254,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"\n[FATAL ERROR] {e}")
+        traceback.print_exc()
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "train_vietocr.log"), "a", encoding="utf-8") as f:
+                f.write(f"\n[FATAL ERROR] {e}\n{traceback.format_exc()}\n")
+        except Exception:
+            pass
+        sys.exit(1)

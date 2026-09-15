@@ -39,9 +39,13 @@ from vietocr.tool.config import Cfg
 from vietocr.tool.predictor import Predictor
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
-weights_dir = os.path.join(base_dir, "weights")
-backup_weights = os.path.join(weights_dir, "vgg_transformer_backup.pth")
-finetuned_weights = os.path.join(weights_dir, "vgg_transformer_finetuned.pth")
+backup_weights = os.path.join(base_dir, "backup_weights", "vgg_transformer_backup.pth")
+if not os.path.exists(backup_weights):
+    backup_weights = os.path.join(base_dir, "weights", "vgg_transformer_backup.pth")
+
+finetuned_weights = os.path.join(base_dir, "weights", "vgg_transformer.pth")
+
+from core.ocr_engine import VietnameseDiacriticsCorrector, enhance_text_crop
 
 config = Cfg.load_config_from_name('vgg_transformer')
 config['cnn']['pretrained'] = False
@@ -72,11 +76,13 @@ for idx, img_path in enumerate(test_images, 1):
     
     pred_orig = baseline_detector.predict(img)
     pred_fine = finetuned_detector.predict(img)
+    pred_corrected = VietnameseDiacriticsCorrector.correct_text(pred_fine)
     
-    is_changed = ">>> [THAY DOI]" if pred_orig != pred_fine else "    [GIONG NHAU]"
+    is_changed = ">>> [THAY DOI]" if pred_orig != pred_corrected else "    [GIONG NHAU]"
     
     print(f"\n--- Mau {idx}: {fname} {is_changed} ---")
-    print(f"  Goc (Baseline):   {pred_orig}")
-    print(f"  Sau tinh chinh:   {pred_fine}")
+    print(f"  Goc (Baseline):         {pred_orig}")
+    print(f"  Sau tinh chinh mo hinh: {pred_fine}")
+    print(f"  Sau phuc hoi thanh dau: {pred_corrected}")
 
 print("\n" + "=" * 75)
