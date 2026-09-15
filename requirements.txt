@@ -1,3 +1,6 @@
+# YEU CAU MOI TRUONG: Python 3.10 - 3.12 (64-bit khuyen dung)
+# Luu y: google-genai va PySide6 khong ho tro Python 3.8 hoac 3.9 cu hon.
+
 PySide6>=6.6.0
 opencv-python>=4.8.0
 rapidocr-onnxruntime>=1.2.0
