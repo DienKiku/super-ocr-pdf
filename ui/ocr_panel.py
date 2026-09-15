@@ -74,12 +74,17 @@ class OCRPanel(QWidget):
         self.lbl_get_key.setStyleSheet("font-size: 11px;")
         key_layout.addWidget(self.lbl_get_key)
 
+        self.lbl_mode_hint = QLabel("💡 <b>Khuyên dùng:</b> Chế độ <b>🌐 Online (Google Gemini AI)</b> cho độ chính xác cao nhất (100%) đối với hóa đơn, bảng biểu và chữ ký viết tay.")
+        self.lbl_mode_hint.setWordWrap(True)
+        self.lbl_mode_hint.setStyleSheet("color: #38bdf8; font-size: 11px; margin-top: 2px;")
+        eng_layout.addWidget(self.lbl_mode_hint)
+
         eng_layout.addWidget(self.api_key_widget)
         layout.addWidget(grp_engine)
 
         saved_key = ConfigManager.get_instance().get_gemini_api_key()
-        pref = ConfigManager.get_instance().get("preferred_engine", "offline")
-        if pref in ("online", "gemini") and saved_key:
+        pref = ConfigManager.get_instance().get("preferred_engine", "online" if saved_key else "offline")
+        if (pref in ("online", "gemini") or saved_key) and saved_key:
             idx = self.combo_engine.findData("online")
         else:
             idx = self.combo_engine.findData("offline")
@@ -161,7 +166,11 @@ class OCRPanel(QWidget):
     def _save_api_key(self):
         key = self.txt_api_key.text().strip()
         ConfigManager.get_instance().set_gemini_api_key(key)
-        QMessageBox.information(self, "Đã lưu API Key", "Đã lưu Google Gemini API Key thành công!")
+        if key:
+            idx = self.combo_engine.findData("online")
+            if idx >= 0:
+                self.combo_engine.setCurrentIndex(idx)
+        QMessageBox.information(self, "Đã lưu API Key", "Đã lưu Google Gemini API Key thành công! Đã tự động chuyển sang chế độ Online AI.")
 
     def _on_api_key_changed(self, text: str):
         ConfigManager.get_instance().set_gemini_api_key(text.strip())

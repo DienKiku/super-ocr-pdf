@@ -1,6 +1,6 @@
 """
 Entry point for Super OCR & High-Res PDF Studio.
-Version: 3.2.2 (Fine-Tuned Vietnamese Handwriting & Diacritics OCR)
+Version: 3.2.3 (Smart Coordinate Alignment & Gemini Vision Priority)
 Updated: 2026-09-15 by Fami (fami_7006)
 """
 

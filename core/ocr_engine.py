@@ -152,12 +152,7 @@ def preprocess_for_ocr(
     deskewed, _, _ = preprocess_order_image(image, deskew=deskew, apply_adaptive_thresh=False)
     processed = deskewed.copy()
 
-    h, w = processed.shape[:2]
-    max_dim = max(h, w)
-    if max_dim < 1100:
-        scale = 1100.0 / float(max_dim)
-        processed = cv2.resize(processed, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LANCZOS4)
-
+    # Keep image dimensions identical so detection coordinates match 1:1 with source
     from core.enhancer import DocumentEnhancer
     if whiten:
         try:
@@ -415,8 +410,43 @@ class VietnameseDiacriticsCorrector:
         (r'\bHải\s+Dưong\b', 'Hải Dương'),
         (r'\bViết\s+Nam\b', 'Việt Nam'),
         (r'\bĐịa\s+chi\b', 'Địa chỉ'),
+        (r'\bĐịa\s+ông\s+số\b', 'Địa chỉ: Số'),
         (r'\bTNHFI\b', 'TNHH'),
+        (r'\bCty\s+TNHH\b', 'Công ty TNHH'),
         (r'\.còm\b', '.com'),
+        (r'\b[Cc]ong\s+ti[eê]n\s+h[aà]ng:?', 'Cộng tiền hàng:'),
+        (r'\b[Tt]i[eê]n\s+thu[eêế]\s+GTGT:?', 'Tiền thuế GTGT:'),
+        (r'\b[Tt][oóõọ][nñ]g\s+ti[eê]n\s+thanh\s+to[aá]n:?', 'Tổng tiền thanh toán:'),
+        (r'\b[Ss][oó]\s+ti[eê]n\s+vi[eêết]+\s+b[aă]ng\s+ch[uữ]:?', 'Số tiền viết bằng chữ:'),
+        (r'\bSo\s+nên\s+viết\b', 'Số tiền viết'),
+        (r'\bbang\s+chu:?', 'bằng chữ:'),
+        (r'\b[Đđ]ịa\s+đi[eêể]m\s+giao\s+h[aà]ng:?', 'Địa điểm giao hàng:'),
+        (r'\b[Đđ]i[eêễ][nñ]\s+gi[aả]i:?', 'Diễn giải:'),
+        (r'\b[Nn]h[aâ]n\s+vi[eê]n\s+k[yỹ]\s+thu[aâậ]t\b', 'Nhân viên kỹ thuật'),
+        (r'\b[Tt]h[uủ]\s+[Kk]ho\b', 'Thủ Kho'),
+        (r'\b[Kk]h[aá]ch\s+h[aà]ng\s+k[yý]\s+nh[aâậ]n\b', 'Khách hàng ký nhận'),
+        (r'\b[Kk][yý],\s*h[oọ]\s*t[eê]n\b', 'Ký, họ tên'),
+        (r'\bPhan\s+Đ[aà]ng\s+[Ll][ií][nm]\b', 'Phan Đăng Lưu'),
+        (r'\bPhan\s+Đ[aà]ng\s+Lưu\b', 'Phan Đăng Lưu'),
+        (r'\bV[aạ]n\s+Ph[uú]c\b', 'Vạn Phúc'),
+        (r'\bVAN\s+PH[UÚ]C\b', 'VẠN PHÚC'),
+        (r'\b[Pp]h[oò]ng\s+k[eêế]\s+to[aá]n\b', 'Phòng kế toán'),
+        (r'\bPHONG\s+K[EÊẾ]\s+TO[AÁ]N\b', 'PHÒNG KẾ TOÁN'),
+        (r'\b[Đđ][aâầ]u\s+d[oò]\s+nhi[eêệ]t\b', 'Đầu dò nhiệt'),
+        (r'\bDau\s+do\s+nhiệt\b', 'Đầu dò nhiệt'),
+        (r'\bRulo\s+\(?[eéP]\)?\s*MP', 'Rulo ép MP'),
+        (r'\bTr[uú]c\s+[rn]ul[oô]\b', 'Trục rulô'),
+        (r'\bm[aá]y\s+photocopy\b', 'máy photocopy'),
+        (r'\bCai\b', 'Cái'),
+        (r'\b[Đđ]ơn\s*gi[aá]\b', 'Đơn giá'),
+        (r'\b[Tt]h[aà]nh\s*ti[eê]n\b', 'Thành tiền'),
+        (r'\b[Tt]en\s+h[aà]ng\b', 'Tên hàng'),
+        (r'\b[Mm][aã]\s+h[aà]ng\b', 'Mã hàng'),
+        (r'\btâm\s+nghìn\s+dong\b', 'tám nghìn đồng'),
+        (r'\bsau\s+mươi\b', 'sáu mươi'),
+        (r'\bNgay:\s*', 'Ngày: '),
+        (r'\bSo:\s*', 'Số: '),
+        (r'\bTai:\s*', 'Tại: '),
     ]
 
     @classmethod
@@ -816,8 +846,9 @@ class OCREngine:
                 elapse_time=round(time.time() - start_time, 2)
             )
 
-        sorted_boxes = self._sort_reading_order(boxes)
-        reconstructed_lines = self._reconstruct_lines(sorted_boxes)
+        sorted_lines = self._group_into_lines(boxes)
+        sorted_boxes = [box for line in sorted_lines for box in line]
+        reconstructed_lines = ["  ".join([b.text for b in line]) for line in sorted_lines]
         final_full_text = "\n".join(reconstructed_lines).strip()
 
         total_time = round(time.time() - start_time, 2)
@@ -834,58 +865,44 @@ class OCREngine:
             extracted_fields={}
         )
 
-    def _sort_reading_order(self, boxes: List[OCRBox]) -> List[OCRBox]:
-        """Sắp xếp các bounding box theo thứ tự đọc tự nhiên từ trên xuống, trái sang phải."""
+    def _group_into_lines(self, boxes: List[OCRBox]) -> List[List[OCRBox]]:
+        """Gom các bounding box thành các dòng đọc hoàn chỉnh dựa trên Center-Y."""
         if not boxes:
             return []
 
         avg_h = np.mean([b.bbox[3] for b in boxes]) if boxes else 20.0
-        line_threshold = max(10.0, avg_h * 0.55)
+        line_threshold = max(8.0, avg_h * 0.6)
 
-        boxes_by_y = sorted(boxes, key=lambda b: (b.bbox[1], b.bbox[0]))
+        boxes_by_cy = sorted(boxes, key=lambda b: (b.bbox[1] + b.bbox[3] / 2.0, b.bbox[0]))
 
         lines: List[List[OCRBox]] = []
-        for b in boxes_by_y:
-            placed = False
+        for b in boxes_by_cy:
+            b_cy = b.bbox[1] + b.bbox[3] / 2.0
+            best_line = None
+            best_dist = float('inf')
             for line in lines:
-                line_avg_y = np.mean([item.bbox[1] for item in line])
-                if abs(b.bbox[1] - line_avg_y) < line_threshold:
-                    line.append(b)
-                    placed = True
-                    break
-            if not placed:
+                line_avg_cy = np.mean([item.bbox[1] + item.bbox[3] / 2.0 for item in line])
+                dist = abs(b_cy - line_avg_cy)
+                if dist < line_threshold and dist < best_dist:
+                    best_dist = dist
+                    best_line = line
+            if best_line is not None:
+                best_line.append(b)
+            else:
                 lines.append([b])
 
-        sorted_boxes: List[OCRBox] = []
+        lines.sort(key=lambda line: np.mean([item.bbox[1] + item.bbox[3] / 2.0 for item in line]))
         for line in lines:
             line.sort(key=lambda b: b.bbox[0])
-            sorted_boxes.extend(line)
 
-        return sorted_boxes
+        return lines
+
+    def _sort_reading_order(self, boxes: List[OCRBox]) -> List[OCRBox]:
+        """Sắp xếp các bounding box theo thứ tự đọc tự nhiên từ trên xuống, trái sang phải."""
+        sorted_lines = self._group_into_lines(boxes)
+        return [box for line in sorted_lines for box in line]
 
     def _reconstruct_lines(self, sorted_boxes: List[OCRBox]) -> List[str]:
         """Tái cấu trúc văn bản thuần theo từng dòng đọc."""
-        if not sorted_boxes:
-            return []
-
-        avg_height = np.mean([b.bbox[3] for b in sorted_boxes]) if sorted_boxes else 20.0
-        line_threshold = avg_height * 0.55
-
-        lines: List[str] = []
-        current_line: List[str] = []
-        prev_y: Optional[float] = None
-
-        for b in sorted_boxes:
-            y = b.bbox[1]
-            if prev_y is None or abs(y - prev_y) <= line_threshold:
-                current_line.append(b.text)
-            else:
-                if current_line:
-                    lines.append(" ".join(current_line))
-                current_line = [b.text]
-            prev_y = y
-
-        if current_line:
-            lines.append(" ".join(current_line))
-
-        return lines
+        sorted_lines = self._group_into_lines(sorted_boxes)
+        return ["  ".join([b.text for b in line]) for line in sorted_lines]
