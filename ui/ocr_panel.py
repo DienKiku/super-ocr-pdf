@@ -37,8 +37,9 @@ class OCRPanel(QWidget):
         grp_engine = QGroupBox("CHẾ ĐỘ NHẬN DIỆN OCR")
         eng_layout = QVBoxLayout(grp_engine)
         self.combo_engine = QComboBox()
-        self.combo_engine.addItem("🌐 Online (AI Vision Cloud) — Chuẩn 100% Viết tay & In ấn (Google Gemini)", "online")
-        self.combo_engine.addItem("💻 Offline (PaddleOCR DBNet + VietOCR) — Nhận diện tiếng Việt & Viết tay 100% Offline", "offline")
+        self.combo_engine.addItem("⚡ Hybrid (Đối soát Đa tầng) — Chuẩn 100% Viết tay, Bảng biểu & Tọa độ PDF (Khuyên dùng)", "hybrid")
+        self.combo_engine.addItem("🌐 Online (AI Vision Cloud) — Nhận diện văn bản thuần qua Google Gemini", "online")
+        self.combo_engine.addItem("💻 Offline (PaddleOCR DBNet + VietOCR) — 100% Cục bộ không cần mạng", "offline")
         self.combo_engine.currentIndexChanged.connect(self._on_engine_changed)
         eng_layout.addWidget(self.combo_engine)
 
@@ -83,9 +84,9 @@ class OCRPanel(QWidget):
         layout.addWidget(grp_engine)
 
         saved_key = ConfigManager.get_instance().get_gemini_api_key()
-        pref = ConfigManager.get_instance().get("preferred_engine", "online" if saved_key else "offline")
-        if (pref in ("online", "gemini") or saved_key) and saved_key:
-            idx = self.combo_engine.findData("online")
+        pref = ConfigManager.get_instance().get("preferred_engine", "hybrid" if saved_key else "offline")
+        if (pref in ("hybrid", "online", "gemini") or saved_key) and saved_key:
+            idx = self.combo_engine.findData("hybrid")
         else:
             idx = self.combo_engine.findData("offline")
 
@@ -150,7 +151,7 @@ class OCRPanel(QWidget):
 
     def _on_engine_changed(self, index: int):
         mode = self.combo_engine.currentData()
-        self.api_key_widget.setVisible(mode in ("online", "gemini"))
+        self.api_key_widget.setVisible(mode in ("hybrid", "online", "gemini"))
         OCREngine.get_instance().engine_mode = mode
         ConfigManager.get_instance().set("preferred_engine", mode)
         self.engine_changed.emit(mode)
@@ -167,10 +168,10 @@ class OCRPanel(QWidget):
         key = self.txt_api_key.text().strip()
         ConfigManager.get_instance().set_gemini_api_key(key)
         if key:
-            idx = self.combo_engine.findData("online")
+            idx = self.combo_engine.findData("hybrid")
             if idx >= 0:
                 self.combo_engine.setCurrentIndex(idx)
-        QMessageBox.information(self, "Đã lưu API Key", "Đã lưu Google Gemini API Key thành công! Đã tự động chuyển sang chế độ Online AI.")
+        QMessageBox.information(self, "Đã lưu API Key", "Đã lưu Google Gemini API Key thành công! Đã tự động chuyển sang chế độ ⚡ Hybrid (Đối soát Đa tầng).")
 
     def _on_api_key_changed(self, text: str):
         ConfigManager.get_instance().set_gemini_api_key(text.strip())

@@ -410,19 +410,22 @@ class MainWindow(QMainWindow):
             w.cancel()
 
         engine_mode = self.ocr_panel.get_selected_engine()
-        if engine_mode in ("online", "gemini"):
+        if engine_mode in ("hybrid", "online", "gemini"):
             from core.config_manager import ConfigManager
             api_key = ConfigManager.get_instance().get_gemini_api_key()
             if not api_key:
                 QMessageBox.warning(
                     self,
                     "Cần Gemini API Key",
-                    "Chế độ '🌐 Online (Google Gemini AI)' cần API Key để hoạt động.\n\n"
+                    "Chế độ '⚡ Hybrid' & '🌐 Online' cần API Key để đối soát thông minh.\n\n"
                     "Vui lòng nhập API Key tại ô bên dưới mục chọn chế độ OCR và bấm 'Lưu' trước khi quét.\n"
                     "(Bạn có thể lấy API Key miễn phí tại https://aistudio.google.com)"
                 )
                 return
-            mode_label = "Google Gemini Vision AI (Online)"
+            if engine_mode == "hybrid":
+                mode_label = "Hybrid Đối soát Đa tầng (Online AI + DBNet)"
+            else:
+                mode_label = "Google Gemini Vision AI (Online)"
         else:
             mode_label = "PaddleOCR DBNet + VietOCR (Offline)"
 
@@ -474,14 +477,14 @@ class MainWindow(QMainWindow):
 
         self.tabs.setCurrentWidget(self.ocr_panel)
         engine_mode = self.ocr_panel.get_selected_engine()
-        if engine_mode in ("online", "gemini"):
+        if engine_mode in ("hybrid", "online", "gemini"):
             from core.config_manager import ConfigManager
             api_key = ConfigManager.get_instance().get_gemini_api_key()
             if not api_key:
                 QMessageBox.warning(
                     self,
                     "Cần Gemini API Key",
-                    "Chế độ '🌐 Online (Google Gemini AI)' cần API Key để hoạt động.\n\n"
+                    "Chế độ '⚡ Hybrid' & '🌐 Online' cần API Key để hoạt động.\n\n"
                     "Vui lòng nhập API Key tại ô bên dưới mục chọn chế độ OCR và bấm 'Lưu' trước khi quét.\n"
                     "(Bạn có thể lấy API Key miễn phí tại https://aistudio.google.com)"
                 )
@@ -516,13 +519,13 @@ class MainWindow(QMainWindow):
 
     def _show_about(self):
         msg = (
-            "<h3>Super OCR & High-Res PDF Studio (v3.2.3)</h3>"
+            "<h3>Super OCR & High-Res PDF Studio (v3.3.0)</h3>"
             "<p><b>Phần mềm phục chế làm nét văn bản, quét OCR và xuất PDF siêu phân giải</b></p>"
             "<ul>"
             "<li><b>Làm nét chữ:</b> Unsharp Masking, CLAHE, lọc viền chi tiết, khử nhòe mờ</li>"
             "<li><b>Siêu phân giải:</b> Phóng to 2x, 3x, 4x với thuật toán Lanczos-4 không vỡ hạt</li>"
             "<li><b>Tẩy trắng nền:</b> Khử bóng đổ, làm trắng trang giấy sạch sẽ</li>"
-            "<li><b>Nhận diện OCR:</b> 🌐 Online (Google Gemini AI) & 💻 Offline Tiếng Việt & Viết tay (PaddleOCR DBNet + VietOCR)</li>"
+            "<li><b>Nhận diện OCR:</b> ⚡ Hybrid Đối soát Đa tầng (Online AI + DBNet), 🌐 Online (Google Gemini AI), 💻 Offline Tiếng Việt & Viết tay</li>"
             "<li><b>Xuất PDF:</b> Hỗ trợ Searchable PDF (có lớp chữ ẩn tìm kiếm/copy được) và High-Res Image PDF</li>"
             "</ul>"
             "<p><i>Phát triển bởi Fami (fami_7006)</i></p>"

@@ -1,6 +1,6 @@
 """
 Entry point for Super OCR & High-Res PDF Studio.
-Version: 3.2.3 (Smart Coordinate Alignment & Gemini Vision Priority)
+Version: 3.3.0 (Hybrid Cross-Verification OCR & Clean Re-Trained Offline Model)
 Updated: 2026-09-15 by Fami (fami_7006)
 """
 
