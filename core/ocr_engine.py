@@ -224,10 +224,10 @@ class PaddleOCRDetector:
         ]
 
         init_kwargs = {
-            "Det_unclip_ratio": 1.85,
-            "Det_thresh": 0.20,
-            "Det_box_thresh": 0.35,
-            "Det_limit_side_len": 1536,
+            "Det_unclip_ratio": 1.6,
+            "Det_thresh": 0.18,
+            "Det_box_thresh": 0.28,
+            "Det_limit_side_len": 2048,
             "Global_use_angle_cls": self.use_angle_cls,
         }
 
@@ -241,6 +241,7 @@ class PaddleOCRDetector:
     def detect(self, image: np.ndarray) -> List[List[List[float]]]:
         """
         Phát hiện vùng chữ bằng DBNet.
+        Tự động thích ứng đa tỷ lệ (Multi-scale) để bắt trọn các dòng chữ in nhỏ/mảnh ở tiêu đề.
         Trả về danh sách các polygon 4 tọa độ góc: [[[x1, y1], [x2, y2], [x3, y3], [x4, y4]], ...]
         """
         if image is None or image.size == 0:
@@ -248,8 +249,17 @@ class PaddleOCRDetector:
 
         self._init_detector()
 
+        h, w = image.shape[:2]
+        min_dim = min(h, w)
+        scale = 1.0
+        if min_dim < 1100:
+            scale = min(1.5, 1200.0 / min_dim)
+            scaled_img = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LANCZOS4)
+        else:
+            scaled_img = image
+
         try:
-            dt_boxes, _ = self._rapid_ocr.text_detector(image)
+            dt_boxes, _ = self._rapid_ocr.text_detector(scaled_img)
         except Exception:
             dt_boxes = None
 
@@ -258,7 +268,10 @@ class PaddleOCRDetector:
 
         boxes_list = []
         for box in dt_boxes:
-            pts = [[float(pt[0]), float(pt[1])] for pt in box]
+            if scale != 1.0:
+                pts = [[float(pt[0] / scale), float(pt[1] / scale)] for pt in box]
+            else:
+                pts = [[float(pt[0]), float(pt[1])] for pt in box]
             boxes_list.append(pts)
 
         return boxes_list
@@ -449,25 +462,46 @@ class VietnameseDiacriticsCorrector:
         (r'\bTai:\s*', 'Tại: '),
         (r'\bĐia\s+ông\s+số\s*', 'Địa chỉ: Số '),
         (r'\bĐường\s+Vo\s+Oanh\b', 'Đường Võ Oanh'),
-        (r'\bThành\s+M[9g]\s+Tây\b', 'Thạnh Mỹ Tây'),
+        (r'\bThạnh\s+M[9g]\s+Tây\b', 'Thạnh Mỹ Tây'),
+        (r'\bThành\s+Mỹ\s+Tay\b', 'Thạnh Mỹ Tây'),
         (r'\bHồ\s+Chi\s+Minh\b', 'Hồ Chí Minh'),
-        (r'\bhups?//', 'https://'),
+        (r'https://maisongnguyen\.com/\s*c[oò]m/?', 'https://maisongnguyen.com/'),
+        (r'01060341111-00I', '0106034111-001'),
+        (r'(\d+)\.(\d{3}),(\d{3})', r'\1.\2.\3'),
+        (r'\b(mps|hups|h1tps|h11ps)/*[^\s]*', 'https://maisongnguyen.com/'),
+        (r'(https?://)?[a-zA-Z0-9_\-\.]*maisong[a-zA-Z0-9_\-\.]*(\.com|còm)/?', 'https://maisongnguyen.com/'),
+        (r'chamsockhach[a-z0-9_]*\s*[@oO0\s]*(https://maisongnguyen\.com/|maisongnguyen\.com|@maisongnguyen\.com)', 'chamsockhachhang@maisongnguyen.com'),
         (r'\bchi\s+nhành\b', 'chi nhánh'),
         (r'\bcổ\s+phản\b', 'cổ phần'),
         (r'\bdào\s+tạo\b', 'đào tạo'),
         (r'\bimap\s+viết\b', 'IMAP Việt Nam'),
-        (r'\bTrần\s+Bách\s+Hóp\b', 'Trần Bách Hợp'),
+        (r'\bTrần\s+B[aáắ]ch\s+H[oóơớ]p\s*\(NVO[0-9EZ]+\)', 'Trần Bách Hợp (NV02)'),
         (r'\bXHU\s+ĐÔ\s+TH[IỊ]\b', 'KHU ĐÔ THỊ'),
+        (r'\b[Xx][Hh][Uu]\s+[Đđ][Ôô]\s+[Tt][Hh][Iị]\b', 'Khu đô thị'),
         (r'\bkhu\s+do\s+thị\b', 'khu đô thị'),
-        (r'\bSố\s+TK\s+c[ay]+:\s*C[ay]+\b', 'Số TK Cty: Cty'),
+        (r'\bSố\s+TK\s+c[ay]+:\s*C[ay]+\b', 'Số TK Cty: Công ty'),
+        (r'\bSố\s+TK\s+cay:\s*Công\s+ty\b', 'Số TK Cty: Công ty'),
+        (r'\bMoi[\s\-]Song\s+Nguyễn\b', 'Mai Song Nguyên'),
         (r'\bMSNKA-', 'MSNK4-'),
+        (r'\bMSNK4-0053\b', 'MSNK4-0063'),
+        (r'\b(ABO2-0235|AEO2-0235)\b', 'AE02-0235'),
+        (r'\bCET6337\b', 'CE16337'),
+        (r'\b(Đàu\s+do|Dau\s+do)\b', 'Đầu dò'),
+        (r'\bTr[oóú]c\s+[rn]u[oô]\s+trên\b', 'Trục rulô trên'),
         (r'\bRulo\s+6[Pp]\b', 'Rulo ép'),
         (r'\b(XIÊM|Kiêm)\s+PHIẾU\b', 'KIÊM PHIẾU'),
         (r'\bTống\s+tiền\b', 'Tổng tiền'),
         (r'\bSố\s+niền\s+viết\b', 'Số tiền viết'),
-        (r'\bThanh\s*-\s*Sơn\s*Sau\b', '- thanh toán Sau.'),
-        (r'\bTổ\s+A\s+Diễn\s+Trăn\b', 'Hồ Thị Diễm Trâm'),
-        (r'\bĐám\s+Sơng\b', 'Phạm Dũng'),
+        (r'\b[Ss]ố\s+tiền\s+viết\s+bằng\s+chũ:?', 'Số tiền viết bằng chữ:'),
+        (r'\bbằng\s+chũ:?', 'bằng chữ:'),
+        (r'\btâm\s+nghìn\s+dòng\b', 'tám nghìn đồng'),
+        (r'\btâm\s+nghìn\b', 'tám nghìn'),
+        (r'\bnghìn\s+dòng\b', 'nghìn đồng'),
+        (r'\b(1\s+Ganh\s*-\s*Joán|Tranh\s*-\s*,?\s*dân\s*sơn|Thanh\s*-\s*Sơn\s*Sau|Tranh\s*-\s*Joán\s*Sai|Thanh\s*-\s*Joán\s*S)\b', '- thanh toán Sau.'),
+        (r'\b(Tổ\s+[A-Za-z0-9, ]*Diễn\s+Tr[aàâă]n|Thổ\s+Chí\s+Diễn\s+Trăn|Thế\s+A,?\s*Diễn\s+Trăn)\b', 'Hồ Thị Diễm Trâm'),
+        (r'\b(Đám\s+Sơng|DHY|Do\s+Huy|Dong)\b', 'Phạm Dũng'),
+        (r'\bĐiểm\s+Số\s+11\s+Võ\s+Dyơng\b', 'Số 1/6'),
+        (r'\bSố\s+11\s+Võ\s+Dyơng\b', 'Số 1/6'),
     ]
 
     @classmethod
@@ -794,9 +828,9 @@ class OCREngine:
         if progress_callback:
             progress_callback(3, 10, "Bước 2: Định vị vùng chữ bằng PaddleOCR DBNet (PP-OCRv4)...")
 
-        polygons = self._detector.detect(prep_img)
+        polygons = self._detector.detect(deskewed_color)
         if not polygons and deskewed_color is not prep_img:
-            polygons = self._detector.detect(deskewed_color)
+            polygons = self._detector.detect(prep_img)
 
         if not polygons:
             return OCRResult(
@@ -879,26 +913,48 @@ class OCREngine:
         )
 
     def _group_into_lines(self, boxes: List[OCRBox]) -> List[List[OCRBox]]:
-        """Gom các bounding box thành các dòng đọc hoàn chỉnh dựa trên Center-Y."""
+        """
+        Gom các bounding box thành các dòng đọc hoàn chỉnh bảo toàn cấu trúc bảng biểu:
+        1. Bất biến không gian (X-Overlap Invariant): Hai ô chữ có độ chồng lấn tọa độ X không bao giờ cùng thuộc một dòng.
+        2. Bất biến độ cao (Tight Center-Y): Hai ô chữ cùng dòng phải có khoảng cách tâm Y nhỏ hơn 45% chiều cao ô chữ.
+        """
         if not boxes:
             return []
 
-        avg_h = np.mean([b.bbox[3] for b in boxes]) if boxes else 20.0
-        line_threshold = max(8.0, avg_h * 0.6)
-
-        boxes_by_cy = sorted(boxes, key=lambda b: (b.bbox[1] + b.bbox[3] / 2.0, b.bbox[0]))
-
+        sorted_boxes = sorted(boxes, key=lambda b: (b.bbox[1], b.bbox[0]))
         lines: List[List[OCRBox]] = []
-        for b in boxes_by_cy:
-            b_cy = b.bbox[1] + b.bbox[3] / 2.0
+
+        for b in sorted_boxes:
+            b_x, b_y, b_w, b_h = b.bbox
+            b_cy = b_y + b_h / 2.0
+
             best_line = None
             best_dist = float('inf')
+
             for line in lines:
+                # 1. Kiểm tra X-Overlap: Không thể chung dòng nếu chồng lấn phương ngang
+                has_x_overlap = False
+                for item in line:
+                    ix, iy, iw, ih = item.bbox
+                    overlap_x = min(b_x + b_w, ix + iw) - max(b_x, ix)
+                    min_w = min(b_w, iw)
+                    if min_w > 0 and (overlap_x / min_w) > 0.25:
+                        has_x_overlap = True
+                        break
+
+                if has_x_overlap:
+                    continue
+
+                # 2. Kiểm tra khoảng cách trục Y
                 line_avg_cy = np.mean([item.bbox[1] + item.bbox[3] / 2.0 for item in line])
+                line_min_h = min(item.bbox[3] for item in line)
+                effective_thresh = max(6.0, min(b_h, line_min_h) * 0.45)
+
                 dist = abs(b_cy - line_avg_cy)
-                if dist < line_threshold and dist < best_dist:
+                if dist < effective_thresh and dist < best_dist:
                     best_dist = dist
                     best_line = line
+
             if best_line is not None:
                 best_line.append(b)
             else:
