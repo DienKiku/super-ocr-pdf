@@ -409,11 +409,7 @@ class MainWindow(QMainWindow):
         for w in self._active_ocr_workers:
             w.cancel()
 
-        engine_mode = self.ocr_panel.get_selected_engine()
-        if "tesseract" in engine_mode:
-            mode_label = "PaddleOCR DBNet + Tesseract OCR (Offline)"
-        else:
-            mode_label = "PaddleOCR DBNet + Deep Learning (Offline)"
+        mode_label = "100% Offline (DBNet + VietOCR + LM)"
 
         # For OCR: use clean original image (rotated if user adjusted orientation)
         ocr_image = item.original_image
@@ -499,7 +495,7 @@ class MainWindow(QMainWindow):
             "<li><b>Làm nét chữ:</b> Unsharp Masking, CLAHE, lọc viền chi tiết, khử nhòe mờ</li>"
             "<li><b>Siêu phân giải:</b> Phóng to 2x, 3x, 4x với thuật toán Lanczos-4 không vỡ hạt</li>"
             "<li><b>Tẩy trắng nền:</b> Khử bóng đổ, làm trắng trang giấy sạch sẽ</li>"
-            "<li><b>Nhận diện OCR 100% Offline:</b> PaddleOCR DBNet (Định vị 1:1) + Mô hình Deep Learning Tiếng Việt & Viết tay + Tùy chọn Tesseract (lang=vie)</li>"
+            "<li><b>Nhận diện OCR 100% Offline:</b> PaddleOCR DBNet (Định vị 1:1) + Mô hình Deep Learning Tiếng Việt & Viết tay (VietOCR + Cinnamon AI)</li>"
             "<li><b>Mô hình Ngôn ngữ (LM):</b> Tự động sửa lỗi chính tả từ vựng theo kho 74.000 từ, khôi phục thanh dấu ngữ cảnh và cấu trúc bảng biểu</li>"
             "<li><b>Xuất PDF:</b> Hỗ trợ Searchable PDF (có lớp chữ ẩn tìm kiếm/copy được) và High-Res Image PDF</li>"
             "</ul>"

@@ -34,18 +34,16 @@ class OCRPanel(QWidget):
         layout.setSpacing(10)
 
         # Group: Engine Selection (100% Offline)
-        grp_engine = QGroupBox("CẤU HÌNH NHẬN DIỆN OCR (100% CỤC BỘ / OFFLINE)")
+        grp_engine = QGroupBox("CHẾ ĐỘ NHẬN DIỆN (100% CỤC BỘ / OFFLINE)")
         eng_layout = QVBoxLayout(grp_engine)
 
-        lbl_pipeline = QLabel("<b>Quy trình:</b> PaddleOCR DBNet (Detection 1:1) ➜ Bộ Nhận Dạng ➜ Mô Hình Ngôn Ngữ (LM)")
+        lbl_engine_info = QLabel("🔥 <b>Mô hình Deep Learning Tiếng Việt & Viết tay</b> (VietOCR + Cinnamon AI)")
+        lbl_engine_info.setStyleSheet("color: #38bdf8; font-size: 12px;")
+        eng_layout.addWidget(lbl_engine_info)
+
+        lbl_pipeline = QLabel("<b>Quy trình 4 Bước:</b> Tiền xử lý ➜ PaddleOCR DBNet (Định vị 1:1) ➜ Deep Learning ➜ Mô hình Ngôn ngữ (LM)")
         lbl_pipeline.setStyleSheet("color: #a1a1aa; font-size: 11px;")
         eng_layout.addWidget(lbl_pipeline)
-
-        self.combo_engine = QComboBox()
-        self.combo_engine.addItem("🔥 Mô hình Deep Learning Tiếng Việt & Viết tay (100% Offline - Khuyên dùng)", "neural")
-        self.combo_engine.addItem("🔤 Tesseract OCR (lang=vie - Cần cài đặt Tesseract trên máy)", "tesseract")
-        self.combo_engine.currentIndexChanged.connect(self._on_engine_changed)
-        eng_layout.addWidget(self.combo_engine)
 
         self.chk_use_lm = QCheckBox("🧠 Kích hoạt Hậu xử lý Mô hình Ngôn ngữ (Language Model - LM)")
         self.chk_use_lm.setChecked(True)
@@ -53,20 +51,7 @@ class OCRPanel(QWidget):
         self.chk_use_lm.toggled.connect(self._on_lm_toggled)
         eng_layout.addWidget(self.chk_use_lm)
 
-        self.lbl_mode_hint = QLabel("💡 <b>Gợi ý:</b> Mô hình Deep Learning được huấn luyện chuyên sâu cho tài liệu hóa đơn và chữ viết tay tiếng Việt, hoạt động hoàn toàn Offline không cần mạng.")
-        self.lbl_mode_hint.setWordWrap(True)
-        self.lbl_mode_hint.setStyleSheet("color: #38bdf8; font-size: 11px; margin-top: 2px;")
-        eng_layout.addWidget(self.lbl_mode_hint)
-
         layout.addWidget(grp_engine)
-
-        pref = ConfigManager.get_instance().get("preferred_engine", "neural")
-        idx = self.combo_engine.findData(pref)
-        if idx >= 0:
-            self.combo_engine.setCurrentIndex(idx)
-        else:
-            self.combo_engine.setCurrentIndex(0)
-        self._on_engine_changed(self.combo_engine.currentIndex())
 
         # Trigger Buttons
         btn_layout = QHBoxLayout()
@@ -125,8 +110,7 @@ class OCRPanel(QWidget):
         action_layout.addWidget(self.btn_save_txt)
         layout.addLayout(action_layout)
 
-    def _on_engine_changed(self, index: int):
-        mode = self.combo_engine.currentData()
+    def _on_engine_changed(self, mode: str = "offline"):
         OCREngine.get_instance().engine_mode = mode
         ConfigManager.get_instance().set("preferred_engine", mode)
         self.engine_changed.emit(mode)
@@ -154,7 +138,7 @@ class OCRPanel(QWidget):
             self.btn_scan_current.setText("🔍 Quét trang này")
 
     def get_selected_engine(self) -> str:
-        return self.combo_engine.currentData()
+        return "offline"
 
     def set_ocr_result(self, result: Optional[OCRResult]):
         """Hiển thị kết quả OCR văn bản thuần và thông số thống kê."""

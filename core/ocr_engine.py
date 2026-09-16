@@ -693,71 +693,6 @@ class VietOCREngine:
 
 
 # ---------------------------------------------------------------------------
-# BƯỚC 3 (TÙY CHỌN 2): NHẬN DIỆN CHỮ BẰNG TESSERACT OCR (LANG=VIE)
-# ---------------------------------------------------------------------------
-
-class TesseractRecognizer:
-    """
-    Pipeline 2: Nhận diện chữ bằng Tesseract OCR (lang=vie).
-    - Bước 1: Dùng PaddleOCR DBNet phát hiện bounding box.
-    - Bước 2: Cắt ảnh crop.
-    - Bước 3: Đưa từng crop vào Tesseract (lang=vie).
-    - Bước 4: Hậu xử lý qua VietnameseLanguageModel.
-    """
-    _instance: Optional["TesseractRecognizer"] = None
-
-    def __init__(self):
-        self._available = False
-        self._check_available()
-
-    @classmethod
-    def get_instance(cls) -> "TesseractRecognizer":
-        if cls._instance is None:
-            cls._instance = TesseractRecognizer()
-        return cls._instance
-
-    def _check_available(self):
-        try:
-            import pytesseract
-            candidate_paths = [
-                r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-                r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
-                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Tesseract-OCR", "tesseract.exe"),
-            ]
-            for p in candidate_paths:
-                if os.path.exists(p):
-                    pytesseract.pytesseract.tesseract_cmd = p
-                    self._available = True
-                    return
-
-            import shutil
-            if shutil.which("tesseract"):
-                self._available = True
-        except Exception:
-            self._available = False
-
-    def is_available(self) -> bool:
-        return self._available
-
-    def predict_image(self, image: np.ndarray) -> str:
-        if not self._available or image is None or image.size == 0:
-            return ""
-        try:
-            import pytesseract
-            enhanced = enhance_text_crop(image)
-            if len(enhanced.shape) == 3:
-                rgb_img = cv2.cvtColor(enhanced, cv2.COLOR_BGR2RGB)
-            else:
-                rgb_img = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB)
-            pil_img = Image.fromarray(rgb_img)
-            # PSM 7: Coi crop anh la 1 dong chu don le
-            text = pytesseract.image_to_string(pil_img, lang='vie', config='--psm 7')
-            return text.strip()
-        except Exception:
-            return ""
-
-
-# ---------------------------------------------------------------------------
 # CÁC HÀM HỖ TRỢ TƯƠNG THÍCH NGƯỢC (BACKWARD COMPATIBILITY)
 # ---------------------------------------------------------------------------
 
@@ -777,15 +712,13 @@ def format_structured_order_summary(*args, **kwargs) -> str:
 
 class OCREngine:
     """
-    Hệ thống nhận diện OCR 100% Cục Bộ (Offline) theo quy trình 4 Bước:
+    Hệ thống nhận diện OCR 100% Cục Bộ (Offline) duy nhất theo quy trình 4 Bước:
     - Bước 1: Tiền xử lý ảnh (Pre-processing): Grayscale, Deskew (0°), CLAHE tăng tương phản.
     - Bước 2: Định vị vùng chữ với PaddleOCR DBNet (PP-OCRv4 ONNX) & Cắt ảnh (Crop).
-    - Bước 3: Nhận diện chữ tiếng Việt bằng một trong 2 phương án:
-        + Phương án 1 (Mặc định - Khuyên dùng): Mô hình Deep Learning Tiếng Việt & Viết tay
-          (VGG-Transformer fine-tuned trên corpus VietOCR + Cinnamon AI).
-        + Phương án 2: Tesseract OCR (lang=vie).
+    - Bước 3: Nhận diện chữ tiếng Việt bằng Mô hình Deep Learning Tiếng Việt & Viết tay
+      (VGG-Transformer fine-tuned trên corpus VietOCR + Cinnamon AI).
     - Bước 4: Hậu xử lý qua Mô hình Ngôn ngữ Tiếng Việt (Language Model - LM):
-        Sửa lỗi chính tả từ vựng (74.000 từ), phục hồi thanh dấu ngữ cảnh, chuẩn hóa dấu câu và cột bảng biểu.
+      Sửa lỗi chính tả từ vựng (74.000 từ), phục hồi thanh dấu ngữ cảnh, chuẩn hóa dấu câu và cột bảng biểu.
     """
 
     _instance: Optional["OCREngine"] = None
@@ -793,8 +726,7 @@ class OCREngine:
     def __init__(self):
         self._detector: Optional[PaddleOCRDetector] = None
         self._vietocr: Optional[VietOCREngine] = None
-        self._tesseract: Optional[TesseractRecognizer] = None
-        self._engine_mode: str = "neural"
+        self._engine_mode: str = "offline"
         self.use_language_model: bool = True
 
     @classmethod
@@ -809,21 +741,15 @@ class OCREngine:
 
     @engine_mode.setter
     def engine_mode(self, mode: str):
-        mode_lower = mode.lower().strip()
-        if "tesseract" in mode_lower:
-            self._engine_mode = "tesseract"
-        else:
-            self._engine_mode = "neural"
+        self._engine_mode = "offline"
 
     def _init_detector(self):
         if self._detector is None:
             self._detector = PaddleOCRDetector.get_instance()
 
-    def _init_recognizers(self):
+    def _init_vietocr(self):
         if self._vietocr is None:
             self._vietocr = VietOCREngine.get_instance()
-        if self._tesseract is None:
-            self._tesseract = TesseractRecognizer.get_instance()
 
     def recognize(
         self,
@@ -833,35 +759,25 @@ class OCREngine:
     ) -> OCRResult:
         """
         Nhận diện văn bản trong ảnh hoàn toàn Offline 100%:
-        - mode='neural': PaddleOCR DBNet + Vietnamese Deep Learning + Language Model (LM)
-        - mode='tesseract': PaddleOCR DBNet + Tesseract OCR (lang=vie) + Language Model (LM)
+        PaddleOCR DBNet + Vietnamese Deep Learning + Language Model (LM)
         """
         if image is None or image.size == 0:
             return OCRResult(error="Ảnh rỗng hoặc không hợp lệ")
 
-        active_mode = (mode or self._engine_mode).lower().strip()
         start_time = time.time()
-
         try:
-            return self._recognize_offline(image, active_mode, start_time, progress_callback=progress_callback)
+            return self._recognize_offline(image, start_time, progress_callback=progress_callback)
         except Exception as e:
             return OCRResult(error=f"Lỗi nhận diện OCR: {str(e)}")
 
     def _recognize_offline(
         self,
         image: np.ndarray,
-        active_mode: str,
         start_time: float,
         progress_callback: Optional[Callable[[int, int, str], None]] = None
     ) -> OCRResult:
         self._init_detector()
-        self._init_recognizers()
-
-        is_tesseract = "tesseract" in active_mode
-        if is_tesseract and not self._tesseract.is_available():
-            if progress_callback:
-                progress_callback(1, 10, "Tesseract chưa được cài đặt, tự động chuyển sang Mô hình Deep Learning...")
-            is_tesseract = False
+        self._init_vietocr()
 
         # BƯỚC 1: TIỀN XỬ LÝ ẢNH
         if progress_callback:
@@ -903,22 +819,16 @@ class OCREngine:
         # Sắp xếp các đoạn ảnh theo thứ tự đọc tự nhiên từ trên xuống dưới, trái qua phải
         cropped_items.sort(key=lambda item: (item[1][1], item[1][0]))
 
-        # BƯỚC 3: NHẬN DIỆN CHỮ (DEEP LEARNING HOẶC TESSERACT)
+        # BƯỚC 3: NHẬN DIỆN CHỮ TIẾNG VIỆT BẰNG DEEP LEARNING (VIETOCR)
         total_crops = len(cropped_items)
         boxes: List[OCRBox] = []
-
-        rec_name = "Tesseract OCR (lang=vie)" if is_tesseract else "Mô hình Deep Learning Tiếng Việt"
 
         for idx, (crop, bbox, poly) in enumerate(cropped_items):
             if progress_callback and total_crops > 0:
                 step_pct = 4 + int((idx / total_crops) * 4)
-                progress_callback(step_pct, 10, f"Bước 3: {rec_name} ({idx + 1}/{total_crops} dòng)...")
+                progress_callback(step_pct, 10, f"Bước 3: Nhận diện chữ tiếng Việt ({idx + 1}/{total_crops} dòng)...")
 
-            if is_tesseract:
-                text = self._tesseract.predict_image(crop)
-            else:
-                text = self._vietocr.predict_image(crop)
-
+            text = self._vietocr.predict_image(crop)
             if text:
                 text = unicodedata.normalize("NFC", text.strip())
                 boxes.append(OCRBox(

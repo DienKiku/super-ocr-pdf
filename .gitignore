@@ -62,3 +62,5 @@ vietocr_data/
 train_lmdb/
 valid_lmdb/
 backup_weights/
+data_line.zip
+vietocr_synthetic_data/
