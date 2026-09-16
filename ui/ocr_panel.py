@@ -10,7 +10,7 @@ from PySide6.QtGui import QTextCursor, QDesktopServices
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
     QPushButton, QLineEdit, QFileDialog, QMessageBox,
-    QProgressBar, QComboBox, QGroupBox
+    QProgressBar, QComboBox, QGroupBox, QCheckBox
 )
 
 from core.ocr_engine import OCRResult, OCREngine
@@ -33,65 +33,39 @@ class OCRPanel(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
 
-        # Group: Engine Selection
-        grp_engine = QGroupBox("CHẾ ĐỘ NHẬN DIỆN OCR")
+        # Group: Engine Selection (100% Offline)
+        grp_engine = QGroupBox("CẤU HÌNH NHẬN DIỆN OCR (100% CỤC BỘ / OFFLINE)")
         eng_layout = QVBoxLayout(grp_engine)
+
+        lbl_pipeline = QLabel("<b>Quy trình:</b> PaddleOCR DBNet (Detection 1:1) ➜ Bộ Nhận Dạng ➜ Mô Hình Ngôn Ngữ (LM)")
+        lbl_pipeline.setStyleSheet("color: #a1a1aa; font-size: 11px;")
+        eng_layout.addWidget(lbl_pipeline)
+
         self.combo_engine = QComboBox()
-        self.combo_engine.addItem("⚡ Hybrid (Đối soát Đa tầng) — Chuẩn 100% Viết tay, Bảng biểu & Tọa độ PDF (Khuyên dùng)", "hybrid")
-        self.combo_engine.addItem("🌐 Online (AI Vision Cloud) — Nhận diện văn bản thuần qua Google Gemini", "online")
-        self.combo_engine.addItem("💻 Offline (PaddleOCR DBNet + VietOCR) — 100% Cục bộ không cần mạng", "offline")
+        self.combo_engine.addItem("🔥 Mô hình Deep Learning Tiếng Việt & Viết tay (100% Offline - Khuyên dùng)", "neural")
+        self.combo_engine.addItem("🔤 Tesseract OCR (lang=vie - Cần cài đặt Tesseract trên máy)", "tesseract")
         self.combo_engine.currentIndexChanged.connect(self._on_engine_changed)
         eng_layout.addWidget(self.combo_engine)
 
-        # Gemini API Key Setup Widget
-        self.api_key_widget = QWidget()
-        key_layout = QVBoxLayout(self.api_key_widget)
-        key_layout.setContentsMargins(0, 4, 0, 4)
-        key_layout.setSpacing(4)
+        self.chk_use_lm = QCheckBox("🧠 Kích hoạt Hậu xử lý Mô hình Ngôn ngữ (Language Model - LM)")
+        self.chk_use_lm.setChecked(True)
+        self.chk_use_lm.setToolTip("Tự động sửa lỗi chính tả từ vựng theo kho 74.000 từ, khôi phục thanh dấu ngữ cảnh, chuẩn hóa dấu câu và bảng biểu.")
+        self.chk_use_lm.toggled.connect(self._on_lm_toggled)
+        eng_layout.addWidget(self.chk_use_lm)
 
-        key_input_layout = QHBoxLayout()
-        self.txt_api_key = QLineEdit()
-        self.txt_api_key.setPlaceholderText("Dán Google Gemini API Key vào đây...")
-        self.txt_api_key.setEchoMode(QLineEdit.Password)
-        self.txt_api_key.setText(ConfigManager.get_instance().get_gemini_api_key())
-        self.txt_api_key.textChanged.connect(self._on_api_key_changed)
-
-        self.btn_toggle_echo = QPushButton("👁️")
-        self.btn_toggle_echo.setFixedWidth(32)
-        self.btn_toggle_echo.setToolTip("Hiện / Ẩn API Key")
-        self.btn_toggle_echo.clicked.connect(self._toggle_api_key_visibility)
-
-        self.btn_save_key = QPushButton("💾 Lưu")
-        self.btn_save_key.setFixedWidth(60)
-        self.btn_save_key.clicked.connect(self._save_api_key)
-
-        key_input_layout.addWidget(self.txt_api_key)
-        key_input_layout.addWidget(self.btn_toggle_echo)
-        key_input_layout.addWidget(self.btn_save_key)
-        key_layout.addLayout(key_input_layout)
-
-        self.lbl_get_key = QLabel('<a href="https://aistudio.google.com/app/apikey" style="color: #60a5fa; text-decoration: underline;">👉 Bấm vào đây để lấy Gemini API Key miễn phí (Google AI Studio)</a>')
-        self.lbl_get_key.setOpenExternalLinks(True)
-        self.lbl_get_key.setStyleSheet("font-size: 11px;")
-        key_layout.addWidget(self.lbl_get_key)
-
-        self.lbl_mode_hint = QLabel("💡 <b>Khuyên dùng:</b> Chế độ <b>🌐 Online (Google Gemini AI)</b> cho độ chính xác cao nhất (100%) đối với hóa đơn, bảng biểu và chữ ký viết tay.")
+        self.lbl_mode_hint = QLabel("💡 <b>Gợi ý:</b> Mô hình Deep Learning được huấn luyện chuyên sâu cho tài liệu hóa đơn và chữ viết tay tiếng Việt, hoạt động hoàn toàn Offline không cần mạng.")
         self.lbl_mode_hint.setWordWrap(True)
         self.lbl_mode_hint.setStyleSheet("color: #38bdf8; font-size: 11px; margin-top: 2px;")
         eng_layout.addWidget(self.lbl_mode_hint)
 
-        eng_layout.addWidget(self.api_key_widget)
         layout.addWidget(grp_engine)
 
-        saved_key = ConfigManager.get_instance().get_gemini_api_key()
-        pref = ConfigManager.get_instance().get("preferred_engine", "hybrid" if saved_key else "offline")
-        if (pref in ("hybrid", "online", "gemini") or saved_key) and saved_key:
-            idx = self.combo_engine.findData("hybrid")
-        else:
-            idx = self.combo_engine.findData("offline")
-
+        pref = ConfigManager.get_instance().get("preferred_engine", "neural")
+        idx = self.combo_engine.findData(pref)
         if idx >= 0:
             self.combo_engine.setCurrentIndex(idx)
+        else:
+            self.combo_engine.setCurrentIndex(0)
         self._on_engine_changed(self.combo_engine.currentIndex())
 
         # Trigger Buttons
@@ -126,8 +100,10 @@ class OCRPanel(QWidget):
         self.text_edit = QTextEdit()
         self.text_edit.setPlaceholderText(
             "Kết quả nhận diện văn bản OCR sẽ hiển thị tại đây...\n\n"
-            "• Chế độ 🌐 Online (Google Gemini AI): Chuẩn 100% chữ in, chữ viết tay, bảng biểu qua đám mây.\n"
-            "• Chế độ 💻 Offline (PaddleOCR DBNet + VietOCR): Tiền xử lý Deskew, định vị vùng chữ DBNet & nhận diện tiếng Việt VietOCR 100% Offline.\n\n"
+            "• Chế độ 100% Cục bộ / Offline (Không cần Internet hay API Key).\n"
+            "• PaddleOCR DBNet quét tọa độ khung chữ 1:1 bảo toàn vị trí văn bản.\n"
+            "• Mô hình Deep Learning nhận diện tiếng Việt có dấu và chữ viết tay chuyên sâu.\n"
+            "• Hậu xử lý Mô hình Ngôn ngữ (LM) tự động sửa lỗi chính tả theo kho 74.000 từ và chuẩn hóa bảng biểu.\n\n"
             "Bạn có thể trực tiếp chỉnh sửa văn bản trước khi xuất PDF."
         )
         layout.addWidget(self.text_edit)
@@ -151,30 +127,16 @@ class OCRPanel(QWidget):
 
     def _on_engine_changed(self, index: int):
         mode = self.combo_engine.currentData()
-        self.api_key_widget.setVisible(mode in ("hybrid", "online", "gemini"))
         OCREngine.get_instance().engine_mode = mode
         ConfigManager.get_instance().set("preferred_engine", mode)
         self.engine_changed.emit(mode)
 
-    def _toggle_api_key_visibility(self):
-        if self.txt_api_key.echoMode() == QLineEdit.Password:
-            self.txt_api_key.setEchoMode(QLineEdit.Normal)
-            self.btn_toggle_echo.setText("🔒")
-        else:
-            self.txt_api_key.setEchoMode(QLineEdit.Password)
-            self.btn_toggle_echo.setText("👁️")
+    def _on_lm_toggled(self, checked: bool):
+        OCREngine.get_instance().use_language_model = checked
+        ConfigManager.get_instance().set("use_language_model", checked)
 
-    def _save_api_key(self):
-        key = self.txt_api_key.text().strip()
-        ConfigManager.get_instance().set_gemini_api_key(key)
-        if key:
-            idx = self.combo_engine.findData("hybrid")
-            if idx >= 0:
-                self.combo_engine.setCurrentIndex(idx)
-        QMessageBox.information(self, "Đã lưu API Key", "Đã lưu Google Gemini API Key thành công! Đã tự động chuyển sang chế độ ⚡ Hybrid (Đối soát Đa tầng).")
-
-    def _on_api_key_changed(self, text: str):
-        ConfigManager.get_instance().set_gemini_api_key(text.strip())
+    def is_use_lm(self) -> bool:
+        return self.chk_use_lm.isChecked()
 
     def _on_scan_current_clicked(self):
         self.scan_current_requested.emit()

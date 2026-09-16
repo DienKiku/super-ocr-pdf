@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [('core', 'core'), ('ui', 'ui'), ('weights', 'weights'), ('assets', 'assets')]
 binaries = []
-hiddenimports = ['cv2', 'numpy', 'PIL', 'yaml', 'onnxruntime', 'google', 'google.genai', 'google.genai.types', 'pydantic', 'torch', 'torchvision', 'vietocr']
+hiddenimports = ['cv2', 'numpy', 'PIL', 'yaml', 'onnxruntime', 'torch', 'torchvision', 'vietocr']
 tmp_ret = collect_all('onnxruntime')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('rapidocr_onnxruntime')
@@ -11,10 +11,6 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('pymupdf')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('PySide6')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('google.genai')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('pydantic')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('torchvision')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]

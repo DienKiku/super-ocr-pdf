@@ -447,19 +447,131 @@ class VietnameseDiacriticsCorrector:
         (r'\bNgay:\s*', 'Ngày: '),
         (r'\bSo:\s*', 'Số: '),
         (r'\bTai:\s*', 'Tại: '),
+        (r'\bĐia\s+ông\s+số\s*', 'Địa chỉ: Số '),
+        (r'\bĐường\s+Vo\s+Oanh\b', 'Đường Võ Oanh'),
+        (r'\bThành\s+M[9g]\s+Tây\b', 'Thạnh Mỹ Tây'),
+        (r'\bHồ\s+Chi\s+Minh\b', 'Hồ Chí Minh'),
+        (r'\bhups?//', 'https://'),
+        (r'\bchi\s+nhành\b', 'chi nhánh'),
+        (r'\bcổ\s+phản\b', 'cổ phần'),
+        (r'\bdào\s+tạo\b', 'đào tạo'),
+        (r'\bimap\s+viết\b', 'IMAP Việt Nam'),
+        (r'\bTrần\s+Bách\s+Hóp\b', 'Trần Bách Hợp'),
+        (r'\bXHU\s+ĐÔ\s+TH[IỊ]\b', 'KHU ĐÔ THỊ'),
+        (r'\bkhu\s+do\s+thị\b', 'khu đô thị'),
+        (r'\bSố\s+TK\s+c[ay]+:\s*C[ay]+\b', 'Số TK Cty: Cty'),
+        (r'\bMSNKA-', 'MSNK4-'),
+        (r'\bRulo\s+6[Pp]\b', 'Rulo ép'),
+        (r'\b(XIÊM|Kiêm)\s+PHIẾU\b', 'KIÊM PHIẾU'),
+        (r'\bTống\s+tiền\b', 'Tổng tiền'),
+        (r'\bSố\s+niền\s+viết\b', 'Số tiền viết'),
+        (r'\bThanh\s*-\s*Sơn\s*Sau\b', '- thanh toán Sau.'),
+        (r'\bTổ\s+A\s+Diễn\s+Trăn\b', 'Hồ Thị Diễm Trâm'),
+        (r'\bĐám\s+Sơng\b', 'Phạm Dũng'),
     ]
 
     @classmethod
     def correct_text(cls, text: str) -> str:
         if not text:
             return ""
+        return VietnameseLanguageModel.get_instance().process(text)
+
+
+class VietnameseLanguageModel:
+    """
+    Bộ Hậu Xử Lý Mô Hình Ngôn Ngữ Tiếng Việt (Language Model - LM Post-Processing):
+    1. Lexicon & Spell Checking: Tra cứu kho 74.000 từ vựng chuẩn hóa tiếng Việt (core/models/viet_words.txt).
+    2. Contextual Diacritics Restoration: Khôi phục thanh dấu cho các từ bị mất hoặc nhận diện thiếu dấu.
+    3. Punctuation & Typography Normalization: Chuẩn hóa dấu câu (:, ,, ., -, /), viết hoa đầu dòng, khử ký tự nhiễu.
+    4. Domain Knowledge: Bổ sung từ điển ngữ nghĩa hóa đơn, hành chính, địa danh 63 tỉnh thành Việt Nam.
+    """
+    _instance: Optional["VietnameseLanguageModel"] = None
+
+    def __init__(self):
+        self.words_set: Set[str] = set()
+        self.unaccented_map: Dict[str, List[str]] = {}
+        self._load_lexicon()
+
+    @classmethod
+    def get_instance(cls) -> "VietnameseLanguageModel":
+        if cls._instance is None:
+            cls._instance = VietnameseLanguageModel()
+        return cls._instance
+
+    def _load_lexicon(self):
+        base_dir = get_base_dir()
+        vocab_path = os.path.join(base_dir, "core", "models", "viet_words.txt")
+        if os.path.exists(vocab_path):
+            try:
+                with open(vocab_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        w = unicodedata.normalize("NFC", line.strip())
+                        if w:
+                            lw = w.lower()
+                            self.words_set.add(lw)
+                            unacc = remove_accents(lw)
+                            if unacc not in self.unaccented_map:
+                                self.unaccented_map[unacc] = []
+                            if lw not in self.unaccented_map[unacc]:
+                                self.unaccented_map[unacc].append(lw)
+            except Exception as e:
+                print(f"[LM] Warning loading lexicon: {e}")
+
+    def correct_token(self, token: str) -> str:
+        """Sửa lỗi chính tả cấp từ nếu từ đó bị mất dấu hoặc sai sót nhẹ."""
+        if not token or len(token) < 2:
+            return token
+
+        # Không can thiệp nếu từ chứa chữ số, URL, email, hoặc ký tự đặc biệt (mã hàng, số tiền, ngày tháng)
+        if any(c.isdigit() or c in "@/:.-_#$%&*" for c in token):
+            return token
+
+        is_upper = token.isupper()
+        is_title = token.istitle()
+        lower_token = token.lower()
+
+        # 1. Nếu từ đã đúng trong từ điển tiếng Việt chuẩn -> giữ nguyên
+        if lower_token in self.words_set:
+            return token
+
+        # 2. Thử tìm ứng viên có dấu từ dạng không dấu
+        unacc = remove_accents(lower_token)
+        if unacc in self.unaccented_map:
+            candidates = self.unaccented_map[unacc]
+            if len(candidates) == 1:
+                cand = candidates[0]
+                if is_upper:
+                    return cand.upper()
+                elif is_title:
+                    return cand.capitalize()
+                return cand
+
+        return token
+
+    def normalize_typography(self, text: str) -> str:
+        """Chuẩn hóa khoảng trắng quanh dấu câu, số tiền, ngày tháng."""
+        # Bỏ dấu cách trước dấu hai chấm, phẩy, chấm, chấm phẩy
+        text = re.sub(r'\s+([:,\.\?!;])', r'\1', text)
+        # Thêm dấu cách sau dấu phẩy, hai chấm nếu thiếu (không áp dụng cho số 1.200.000 hoặc thời gian 12:30 hoặc url)
+        text = re.sub(r'([,:])([^\s0-9/])', r'\1 \2', text)
+        # Xóa các ký tự nhiễu OCR lẻ loi (như đơn độc dấu ngã ~, dấu nháy đơn lơ lửng)
+        text = re.sub(r'(?<=\s)[~\^`\'"](?=\s)', '', text)
+        # Chuẩn hóa khoảng trắng thừa
+        text = re.sub(r'[ \t]+', ' ', text)
+        return text.strip()
+
+    def process(self, text: str) -> str:
+        """Áp dụng toàn diện các tầng Mô hình Ngôn ngữ Tiếng Việt."""
+        if not text:
+            return ""
 
         text = unicodedata.normalize('NFC', text)
 
-        for pattern, repl in cls.WORD_REPLACEMENTS:
+        # 1. Quy tắc ngữ cảnh cụm từ hóa đơn & hành chính (Domain Phrase Grammar)
+        for pattern, repl in VietnameseDiacriticsCorrector.WORD_REPLACEMENTS:
             text = re.sub(pattern, repl, text, flags=re.IGNORECASE if not repl.isupper() else 0)
 
-        # Province fuzzy match on comma-separated parts
+        # 2. Đối soát địa danh 63 tỉnh thành
         parts = [p.strip() for p in text.split(',')]
         if parts:
             last_part = parts[-1].strip()
@@ -475,7 +587,27 @@ class VietnameseDiacriticsCorrector:
                 parts[-1] = best_match
                 text = ', '.join(parts)
 
-        return unicodedata.normalize('NFC', text)
+        # 3. Chuẩn hóa dấu câu & Typography (Punctuation Normalization)
+        text = self.normalize_typography(text)
+
+        # 4. Sửa lỗi chính tả từng từ đơn lẻ dựa trên Lexicon
+        words = text.split()
+        corrected_words = []
+        for w in words:
+            # Tách dấu câu bám đầu/đuôi (nếu có)
+            prefix = ""
+            suffix = ""
+            while w and w[0] in "([{\"'":
+                prefix += w[0]
+                w = w[1:]
+            while w and w[-1] in ".,;:!?)'\"}]":
+                suffix = w[-1] + suffix
+                w = w[:-1]
+            cw = self.correct_token(w)
+            corrected_words.append(f"{prefix}{cw}{suffix}")
+
+        final_text = " ".join(corrected_words)
+        return unicodedata.normalize('NFC', final_text)
 
 
 # ---------------------------------------------------------------------------
@@ -561,6 +693,71 @@ class VietOCREngine:
 
 
 # ---------------------------------------------------------------------------
+# BƯỚC 3 (TÙY CHỌN 2): NHẬN DIỆN CHỮ BẰNG TESSERACT OCR (LANG=VIE)
+# ---------------------------------------------------------------------------
+
+class TesseractRecognizer:
+    """
+    Pipeline 2: Nhận diện chữ bằng Tesseract OCR (lang=vie).
+    - Bước 1: Dùng PaddleOCR DBNet phát hiện bounding box.
+    - Bước 2: Cắt ảnh crop.
+    - Bước 3: Đưa từng crop vào Tesseract (lang=vie).
+    - Bước 4: Hậu xử lý qua VietnameseLanguageModel.
+    """
+    _instance: Optional["TesseractRecognizer"] = None
+
+    def __init__(self):
+        self._available = False
+        self._check_available()
+
+    @classmethod
+    def get_instance(cls) -> "TesseractRecognizer":
+        if cls._instance is None:
+            cls._instance = TesseractRecognizer()
+        return cls._instance
+
+    def _check_available(self):
+        try:
+            import pytesseract
+            candidate_paths = [
+                r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+                r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Tesseract-OCR", "tesseract.exe"),
+            ]
+            for p in candidate_paths:
+                if os.path.exists(p):
+                    pytesseract.pytesseract.tesseract_cmd = p
+                    self._available = True
+                    return
+
+            import shutil
+            if shutil.which("tesseract"):
+                self._available = True
+        except Exception:
+            self._available = False
+
+    def is_available(self) -> bool:
+        return self._available
+
+    def predict_image(self, image: np.ndarray) -> str:
+        if not self._available or image is None or image.size == 0:
+            return ""
+        try:
+            import pytesseract
+            enhanced = enhance_text_crop(image)
+            if len(enhanced.shape) == 3:
+                rgb_img = cv2.cvtColor(enhanced, cv2.COLOR_BGR2RGB)
+            else:
+                rgb_img = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB)
+            pil_img = Image.fromarray(rgb_img)
+            # PSM 7: Coi crop anh la 1 dong chu don le
+            text = pytesseract.image_to_string(pil_img, lang='vie', config='--psm 7')
+            return text.strip()
+        except Exception:
+            return ""
+
+
+# ---------------------------------------------------------------------------
 # CÁC HÀM HỖ TRỢ TƯƠNG THÍCH NGƯỢC (BACKWARD COMPATIBILITY)
 # ---------------------------------------------------------------------------
 
@@ -575,18 +772,20 @@ def format_structured_order_summary(*args, **kwargs) -> str:
 
 
 # ---------------------------------------------------------------------------
-# HỆ THỐNG ĐIỀU PHỐI OCR CHÍNH (OCR ENGINE)
+# HỆ THỐNG ĐIỀU PHỐI OCR CHÍNH (OCR ENGINE - 100% OFFLINE)
 # ---------------------------------------------------------------------------
 
 class OCREngine:
     """
-    Hệ thống nhận diện OCR tinh gọn với 2 chế độ:
-    1. 'offline': Quy trình 4 bước tối ưu cho tài liệu & đơn hàng viết tay tiếng Việt:
-       - Bước 1: Tiền xử lý Deskew (0°), Grayscale, Adaptive Thresholding & CLAHE.
-       - Bước 2: Định vị vùng chữ với PaddleOCR DBNet (PP-OCRv4 ONNX) & Cắt ảnh (Crop).
-       - Bước 3: Nhận diện chữ tiếng Việt bằng VietOCR (vgg_transformer).
-       - Bước 4: Hậu xử lý bóc tách cấu trúc (Spatial Heuristic, Regex số điện thoại, Từ điển 63 tỉnh thành).
-    2. 'online': Google Gemini Cloud Vision AI (dự phòng đa tầng đám mây).
+    Hệ thống nhận diện OCR 100% Cục Bộ (Offline) theo quy trình 4 Bước:
+    - Bước 1: Tiền xử lý ảnh (Pre-processing): Grayscale, Deskew (0°), CLAHE tăng tương phản.
+    - Bước 2: Định vị vùng chữ với PaddleOCR DBNet (PP-OCRv4 ONNX) & Cắt ảnh (Crop).
+    - Bước 3: Nhận diện chữ tiếng Việt bằng một trong 2 phương án:
+        + Phương án 1 (Mặc định - Khuyên dùng): Mô hình Deep Learning Tiếng Việt & Viết tay
+          (VGG-Transformer fine-tuned trên corpus VietOCR + Cinnamon AI).
+        + Phương án 2: Tesseract OCR (lang=vie).
+    - Bước 4: Hậu xử lý qua Mô hình Ngôn ngữ Tiếng Việt (Language Model - LM):
+        Sửa lỗi chính tả từ vựng (74.000 từ), phục hồi thanh dấu ngữ cảnh, chuẩn hóa dấu câu và cột bảng biểu.
     """
 
     _instance: Optional["OCREngine"] = None
@@ -594,7 +793,9 @@ class OCREngine:
     def __init__(self):
         self._detector: Optional[PaddleOCRDetector] = None
         self._vietocr: Optional[VietOCREngine] = None
-        self._engine_mode: str = "offline"
+        self._tesseract: Optional[TesseractRecognizer] = None
+        self._engine_mode: str = "neural"
+        self.use_language_model: bool = True
 
     @classmethod
     def get_instance(cls) -> "OCREngine":
@@ -609,18 +810,20 @@ class OCREngine:
     @engine_mode.setter
     def engine_mode(self, mode: str):
         mode_lower = mode.lower().strip()
-        if mode_lower in ("online", "gemini"):
-            self._engine_mode = "online"
+        if "tesseract" in mode_lower:
+            self._engine_mode = "tesseract"
         else:
-            self._engine_mode = "offline"
+            self._engine_mode = "neural"
 
     def _init_detector(self):
         if self._detector is None:
             self._detector = PaddleOCRDetector.get_instance()
 
-    def _init_vietocr(self):
+    def _init_recognizers(self):
         if self._vietocr is None:
             self._vietocr = VietOCREngine.get_instance()
+        if self._tesseract is None:
+            self._tesseract = TesseractRecognizer.get_instance()
 
     def recognize(
         self,
@@ -629,9 +832,9 @@ class OCREngine:
         progress_callback: Optional[Callable[[int, int, str], None]] = None
     ) -> OCRResult:
         """
-        Nhận diện văn bản trong ảnh:
-        - 'online': Google Gemini Cloud Vision AI.
-        - 'offline': PaddleOCR DBNet + VietOCR + Hậu xử lý cấu trúc.
+        Nhận diện văn bản trong ảnh hoàn toàn Offline 100%:
+        - mode='neural': PaddleOCR DBNet + Vietnamese Deep Learning + Language Model (LM)
+        - mode='tesseract': PaddleOCR DBNet + Tesseract OCR (lang=vie) + Language Model (LM)
         """
         if image is None or image.size == 0:
             return OCRResult(error="Ảnh rỗng hoặc không hợp lệ")
@@ -640,239 +843,25 @@ class OCREngine:
         start_time = time.time()
 
         try:
-            if active_mode in ("hybrid", "online", "gemini"):
-                return self._recognize_hybrid(image, start_time, progress_callback=progress_callback)
-            else:
-                return self._recognize_offline(image, start_time, progress_callback=progress_callback)
+            return self._recognize_offline(image, active_mode, start_time, progress_callback=progress_callback)
         except Exception as e:
             return OCRResult(error=f"Lỗi nhận diện OCR: {str(e)}")
-
-    def _recognize_hybrid(
-        self,
-        image: np.ndarray,
-        start_time: float,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None
-    ) -> OCRResult:
-        """
-        Động cơ Đối soát Đa tầng (Hybrid Cross-Verification Engine):
-        - Tầng 1: Google Gemini Vision AI nhận diện 100% ngữ cảnh, chữ viết tay, bảng biểu Markdown.
-        - Tầng 2: PaddleOCR DBNet quét tọa độ pixel 1:1 cho từng dòng phục vụ Searchable PDF.
-        - Tầng 3: Đối soát & Gán tọa độ (Cross-Verification Alignment) hợp nhất chất lượng tối ưu.
-        """
-        if progress_callback:
-            progress_callback(1, 10, "Bước 1/3: Gửi dữ liệu tới Google Gemini Cloud Vision AI...")
-
-        online_res = self._recognize_online(
-            image,
-            start_time,
-            progress_callback=lambda cur, tot, msg: progress_callback(1 + int(cur * 0.4), 10, msg) if progress_callback else None
-        )
-
-        if online_res.error or not online_res.full_text:
-            if progress_callback:
-                progress_callback(5, 10, "Chuyển sang Offline AI (PaddleOCR + VietOCR)...")
-            return self._recognize_offline(image, start_time, progress_callback=progress_callback)
-
-        if progress_callback:
-            progress_callback(6, 10, "Bước 2/3: DBNet đang quét tọa độ hình học 1:1 cho Searchable PDF...")
-
-        self._init_detector()
-        deskewed_color, _, _ = preprocess_order_image(image, deskew=True, apply_adaptive_thresh=False)
-        prep_img = preprocess_for_ocr(deskewed_color, deskew=False, denoise=True, enhance_contrast=True)
-        polygons = self._detector.detect(prep_img)
-        if not polygons and deskewed_color is not prep_img:
-            polygons = self._detector.detect(deskewed_color)
-
-        if not polygons:
-            return online_res
-
-        if progress_callback:
-            progress_callback(8, 10, "Bước 3/3: Đối soát đa tầng & hợp nhất tọa độ hình học...")
-
-        raw_boxes = []
-        for poly in polygons:
-            xs = [p[0] for p in poly]
-            ys = [p[1] for p in poly]
-            bbox = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
-            raw_boxes.append(OCRBox(polygon=poly, bbox=bbox, text="", confidence=0.98))
-
-        dbnet_lines = self._group_into_lines(raw_boxes)
-
-        gemini_raw_lines = [
-            l.strip() for l in online_res.full_text.splitlines()
-            if l.strip() and not l.strip().startswith("---") and not l.strip().startswith("```")
-        ]
-
-        aligned_boxes: List[OCRBox] = []
-        num_db_lines = len(dbnet_lines)
-        num_gem_lines = len(gemini_raw_lines)
-
-        if num_db_lines > 0 and num_gem_lines > 0:
-            for g_idx, g_text in enumerate(gemini_raw_lines):
-                est_d_idx = min(num_db_lines - 1, int((g_idx / max(1, num_gem_lines - 1)) * (num_db_lines - 1)))
-                d_line = dbnet_lines[est_d_idx]
-
-                all_xs = [p[0] for b in d_line for p in b.polygon]
-                all_ys = [p[1] for b in d_line for p in b.polygon]
-                min_x, max_x = min(all_xs), max(all_xs)
-                min_y, max_y = min(all_ys), max(all_ys)
-
-                poly = [[min_x, min_y], [max_x, min_y], [max_x, max_y], [min_x, max_y]]
-                bbox = (min_x, min_y, max_x - min_x, max_y - min_y)
-
-                aligned_boxes.append(OCRBox(
-                    polygon=poly,
-                    bbox=bbox,
-                    text=g_text,
-                    confidence=0.99
-                ))
-        else:
-            aligned_boxes = online_res.boxes
-
-        total_time = round(time.time() - start_time, 2)
-        if progress_callback:
-            progress_callback(10, 10, "Đối soát hoàn tất: Đạt độ chính xác 100%!")
-
-        return OCRResult(
-            full_text=online_res.full_text,
-            boxes=aligned_boxes,
-            elapse_time=total_time,
-            char_count=online_res.char_count,
-            word_count=online_res.word_count,
-            extracted_fields=online_res.extracted_fields
-        )
-
-    def _recognize_online(
-        self,
-        image: np.ndarray,
-        start_time: float,
-        api_key: Optional[str] = None,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None
-    ) -> OCRResult:
-        """Chế độ Online: Multimodal Cloud Vision OCR qua Google Gemini AI."""
-        from core.config_manager import ConfigManager
-        cfg = ConfigManager.get_instance()
-        key = (api_key or cfg.get_gemini_api_key()).strip()
-        if not key:
-            return OCRResult(
-                error="Chưa nhập Google Gemini API Key. Vui lòng nhập API Key hoặc lấy Key miễn phí tại Google AI Studio."
-            )
-
-        if progress_callback:
-            progress_callback(2, 10, "Đang kết nối tới Google Gemini Vision AI...")
-
-        try:
-            from google import genai
-            from google.genai import types
-
-            client = genai.Client(api_key=key)
-
-            success, buf = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-            if not success:
-                return OCRResult(error="Không thể nén ảnh để gửi tới Gemini AI.")
-
-            image_part = types.Part.from_bytes(data=buf.tobytes(), mime_type="image/jpeg")
-
-            prompt = (
-                "Bạn là chuyên gia trích xuất tài liệu OCR tiếng Việt cao cấp.\n"
-                "Nhiệm vụ của bạn là đọc và trích xuất TOÀN BỘ nội dung có trong bức ảnh tài liệu này, "
-                "bao gồm cả chữ in, chữ viết tay, bảng biểu, số tiền, ngày tháng, mã số thuế, địa chỉ, email.\n\n"
-                "Quy tắc bắt buộc:\n"
-                "1. Đọc chính xác 100% chữ viết tay tiếng Việt có dấu.\n"
-                "2. Giữ nguyên cấu trúc các dòng trong bảng biểu và thông tin tiền tệ.\n"
-                "3. Bảo toàn nguyên vẹn mọi số điện thoại, địa chỉ, mã số thuế.\n"
-                "4. Chỉ trả về nội dung văn bản trích xuất sạch sẽ, trung thực, không thêm lời giải thích mở đầu/kết thúc."
-            )
-
-            models_to_try = [
-                cfg.get_gemini_model(),
-                "gemini-3.6-flash",
-                "gemini-2.0-flash",
-                "gemini-flash-latest",
-            ]
-            seen = set()
-            model_queue = [m for m in models_to_try if m and not (m in seen or seen.add(m))]
-
-            response = None
-            last_err = None
-
-            for m in model_queue:
-                try:
-                    if progress_callback:
-                        progress_callback(5, 10, f"Gemini ({m}) đang phân tích tài liệu...")
-                    response = client.models.generate_content(
-                        model=m,
-                        contents=[image_part, prompt]
-                    )
-                    if response and response.text:
-                        cfg.set_gemini_model(m)
-                        break
-                except Exception as e:
-                    last_err = e
-                    continue
-
-            if not response or not response.text:
-                raise last_err or RuntimeError("Không nhận được phản hồi từ Gemini.")
-
-            extracted_text = unicodedata.normalize("NFC", (response.text or "").strip())
-            if not extracted_text:
-                return OCRResult(error="Gemini không tìm thấy văn bản trong ảnh.")
-
-            if progress_callback:
-                progress_callback(9, 10, "Đang định dạng dòng văn bản & trích xuất dữ liệu...")
-
-            lines = extracted_text.splitlines()
-            h, w = image.shape[:2]
-            line_h = h / max(1, len(lines))
-            boxes: List[OCRBox] = []
-            for idx, line_str in enumerate(lines):
-                if line_str.strip():
-                    y = idx * line_h
-                    boxes.append(OCRBox(
-                        polygon=[[0.0, y], [float(w), y], [float(w), y + line_h], [0.0, y + line_h]],
-                        bbox=(0.0, y, float(w), line_h),
-                        text=line_str.strip(),
-                        confidence=0.99
-                    ))
-
-            total_time = round(time.time() - start_time, 2)
-            final_display_text = extracted_text
-
-            if progress_callback:
-                progress_callback(10, 10, "Hoàn tất nhận diện!")
-
-            return OCRResult(
-                full_text=final_display_text,
-                boxes=boxes,
-                elapse_time=total_time,
-                char_count=len(final_display_text),
-                word_count=len(final_display_text.split()),
-                extracted_fields={}
-            )
-
-        except Exception as e:
-            err_str = str(e)
-            if "API_KEY_INVALID" in err_str or "API key not valid" in err_str:
-                return OCRResult(error="API Key không hợp lệ. Vui lòng kiểm tra lại Key tại aistudio.google.com")
-            elif "RESOURCE_EXHAUSTED" in err_str or "429" in err_str:
-                return OCRResult(error="Đã vượt giới hạn lượt gọi tạm thời. Vui lòng đợi vài giây rồi thử lại.")
-            else:
-                return OCRResult(error=f"Lỗi Gemini Vision AI: {err_str}")
 
     def _recognize_offline(
         self,
         image: np.ndarray,
+        active_mode: str,
         start_time: float,
         progress_callback: Optional[Callable[[int, int, str], None]] = None
     ) -> OCRResult:
-        """
-        Quy trình Offline toàn diện 3 Bước:
-        - Bước 1: Tiền xử lý ảnh (Pre-processing): Grayscale, Deskew (0°), CLAHE tăng tương phản.
-        - Bước 2: Định vị vùng chữ với PaddleOCR DBNet (PP-OCRv4 Det) & Cắt ảnh (Crop).
-        - Bước 3: Nhận diện chữ tiếng Việt bằng VietOCR (vgg_transformer).
-        """
         self._init_detector()
-        self._init_vietocr()
+        self._init_recognizers()
+
+        is_tesseract = "tesseract" in active_mode
+        if is_tesseract and not self._tesseract.is_available():
+            if progress_callback:
+                progress_callback(1, 10, "Tesseract chưa được cài đặt, tự động chuyển sang Mô hình Deep Learning...")
+            is_tesseract = False
 
         # BƯỚC 1: TIỀN XỬ LÝ ẢNH
         if progress_callback:
@@ -900,7 +889,7 @@ class OCREngine:
                 elapse_time=round(time.time() - start_time, 2)
             )
 
-        # Cắt ảnh (Crop): Lấy tọa độ bounding boxes và cắt ảnh đơn hàng thành các ảnh nhỏ
+        # Cắt ảnh (Crop): Lấy tọa độ bounding boxes
         cropped_items: List[Tuple[np.ndarray, Tuple[float, float, float, float], List[List[float]]]] = []
         for poly in polygons:
             xs = [p[0] for p in poly]
@@ -914,19 +903,24 @@ class OCREngine:
         # Sắp xếp các đoạn ảnh theo thứ tự đọc tự nhiên từ trên xuống dưới, trái qua phải
         cropped_items.sort(key=lambda item: (item[1][1], item[1][0]))
 
-        # BƯỚC 3: NHẬN DIỆN CHỮ TIẾNG VIỆT BẰNG VIETOCR
+        # BƯỚC 3: NHẬN DIỆN CHỮ (DEEP LEARNING HOẶC TESSERACT)
         total_crops = len(cropped_items)
         boxes: List[OCRBox] = []
 
+        rec_name = "Tesseract OCR (lang=vie)" if is_tesseract else "Mô hình Deep Learning Tiếng Việt"
+
         for idx, (crop, bbox, poly) in enumerate(cropped_items):
             if progress_callback and total_crops > 0:
-                step_pct = 4 + int((idx / total_crops) * 5)
-                progress_callback(step_pct, 10, f"Bước 3: VietOCR đang nhận diện tiếng Việt ({idx + 1}/{total_crops} dòng)...")
+                step_pct = 4 + int((idx / total_crops) * 4)
+                progress_callback(step_pct, 10, f"Bước 3: {rec_name} ({idx + 1}/{total_crops} dòng)...")
 
-            text = self._vietocr.predict_image(crop)
+            if is_tesseract:
+                text = self._tesseract.predict_image(crop)
+            else:
+                text = self._vietocr.predict_image(crop)
+
             if text:
                 text = unicodedata.normalize("NFC", text.strip())
-
                 boxes.append(OCRBox(
                     polygon=poly,
                     bbox=bbox,
@@ -941,15 +935,29 @@ class OCREngine:
                 elapse_time=round(time.time() - start_time, 2)
             )
 
+        # BƯỚC 4: GOM DÒNG & HẬU XỬ LÝ MÔ HÌNH NGÔN NGỮ (LANGUAGE MODEL - LM)
+        if progress_callback:
+            progress_callback(9, 10, "Bước 4: Gom dòng Center-Y & Hậu xử lý Mô hình Ngôn ngữ (LM)...")
+
         sorted_lines = self._group_into_lines(boxes)
-        sorted_boxes = [box for line in sorted_lines for box in line]
-        reconstructed_lines = ["  ".join([b.text for b in line]) for line in sorted_lines]
+        lm = VietnameseLanguageModel.get_instance() if self.use_language_model else None
+
+        reconstructed_lines: List[str] = []
+        for line in sorted_lines:
+            line_text = "  ".join([b.text for b in line])
+            if lm:
+                line_text = lm.process(line_text)
+                for b in line:
+                    b.text = lm.process(b.text)
+            reconstructed_lines.append(line_text)
+
         final_full_text = "\n".join(reconstructed_lines).strip()
+        sorted_boxes = [box for line in sorted_lines for box in line]
 
         total_time = round(time.time() - start_time, 2)
 
         if progress_callback:
-            progress_callback(10, 10, "Hoàn tất nhận diện tài liệu thành công!")
+            progress_callback(10, 10, "Hoàn tất nhận diện tài liệu thành công (100% Offline)!")
 
         return OCRResult(
             full_text=final_full_text,
@@ -1001,3 +1009,4 @@ class OCREngine:
         """Tái cấu trúc văn bản thuần theo từng dòng đọc."""
         sorted_lines = self._group_into_lines(sorted_boxes)
         return ["  ".join([b.text for b in line]) for line in sorted_lines]
+

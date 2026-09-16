@@ -1,7 +1,7 @@
 """
 Entry point for Super OCR & High-Res PDF Studio.
-Version: 3.3.0 (Hybrid Cross-Verification OCR & Clean Re-Trained Offline Model)
-Updated: 2026-09-15 by Fami (fami_7006)
+Version: 3.4.0 (100% Offline Deep Vietnamese OCR & Language Model)
+Updated: 2026-09-16 by Fami (fami_7006)
 """
 
 import sys
