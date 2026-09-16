@@ -1,9 +1,21 @@
-﻿# 🚀 Super OCR & High-Res PDF Studio
+<div align="center">
 
-Ứng dụng Desktop chuyên nghiệp dành cho Windows: **Phục chế làm nét chữ siêu phân giải (Super-Resolution), nhận diện OCR Tiếng Việt & Chữ viết tay thông minh, và xuất tệp PDF chất lượng cao (Searchable PDF & High-Res Image PDF)**.
+![Super OCR & High-Res PDF Studio](assets/github_cover.png)
+
+# 🚀 Super OCR & High-Res PDF Studio (v3.4.0)
+
+[![GitHub Release](https://img.shields.io/badge/Release-v3.4.0-00d2ff?style=for-the-badge&logo=github)](https://github.com/DienKiku/super-ocr-pdf/releases)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(64--bit)-0078d7?style=for-the-badge&logo=windows)](https://github.com/DienKiku/super-ocr-pdf)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab?style=for-the-badge&logo=python)](https://www.python.org/)
+[![AI Engine](https://img.shields.io/badge/AI%20OCR-100%25%20Offline%20%7C%20PaddleOCR%20%2B%20VietOCR-00f2fe?style=for-the-badge)](https://github.com/DienKiku/super-ocr-pdf)
+[![Formats](https://img.shields.io/badge/Formats-JPEG%20XL%20%7C%20PNG%20%7C%20JPG%20%7C%20PDF-brightgreen?style=for-the-badge)](https://github.com/DienKiku/super-ocr-pdf)
+
+Ứng dụng Desktop chuyên nghiệp dành cho Windows: **Phục chế làm nét chữ siêu phân giải (Super-Resolution), nhận diện OCR Tiếng Việt & Chữ viết tay thông minh 100% Offline, hỗ trợ ảnh JPEG XL (JXL) dung lượng lớn và xuất tệp PDF chất lượng cao (Searchable PDF & High-Res Image PDF)**.
 
 Phát triển bởi: **Fami (fami_7006)**  
 Mã nguồn: [https://github.com/DienKiku/super-ocr-pdf](https://github.com/DienKiku/super-ocr-pdf)
+
+</div>
 
 ---
 
@@ -25,17 +37,21 @@ Mã nguồn: [https://github.com/DienKiku/super-ocr-pdf](https://github.com/Dien
 - Kéo thanh trượt trực tiếp trên trang tài liệu để trực quan hóa sự khác biệt giữa **Ảnh gốc (Trước)** và **Ảnh đã phục chế làm nét (Sau)**.
 - Hỗ trợ phóng to/thu nhỏ (Zoom in/out), xem theo tỷ lệ chuẩn 100% (1:1), vừa khít khung nhìn (Fit to window) và di chuyển tự do (Pan).
 
-### 3. 📝 Hệ thống nhận diện OCR đột phá (Kiến trúc 2 tầng)
-- 🇻🇳 **Tiếng Việt Siêu Tốc (Hybrid AI - 100% Offline):**
-  - Tốc độ quét cực nhanh: chỉ **1.5s - 2.5s** cho toàn bộ trang tài liệu A4.
-  - Tích hợp kho từ điển 74.000 từ tiếng Việt chuẩn kết hợp thuật toán N-gram greedy giúp khôi phục chính xác 100% dấu tiếng Việt.
-  - **Bảo toàn nguyên vẹn 100% dữ liệu kỹ thuật:** Tuyệt đối không làm biến dạng đường link (`https://...`), email (`...@...`), mã số thuế (MST), bảng số tiền và các ký hiệu quốc tế.
-- ✨ **AI Vision Thông Minh (Google Gemini Vision API - Chuẩn xác 100% Viết tay):**
-  - Tích hợp mô hình thế hệ mới nhất `gemini-3.6-flash` (kèm cơ chế dự phòng tự thích ứng).
-  - Nhận diện chuẩn xác 100% các tài liệu phức tạp: **chữ viết tay tiếng Việt có dấu**, chữ viết ngoáy bút bi trên hóa đơn, phiếu giao hàng, bảng biểu nhiều cột, số tiền và chữ ký.
-  - Giao diện nhập API Key tiện lợi với nút ẩn/hiện mật khẩu `👁️` và lưu trữ an toàn trong máy.
+### 3. 📝 Hệ thống nhận diện OCR 100% Offline đột phá (Deep Learning Pipeline)
+- 🇻🇳 **Nhận diện Deep Learning 3 tầng (100% Offline - Không cần Internet):**
+  - **Tầng 1 (Line Detection):** Mô hình mạng nơ-ron **PaddleOCR DBNet (Differentiable Binarization)** khoanh vùng từng dòng chữ và khối văn bản chính xác tuyệt đối, không bỏ sót chữ nhỏ hay bảng biểu.
+  - **Tầng 2 (Sequence Recognition):** Mô hình **VietOCR Transformer Seq2Seq** chuyên biệt cho chữ viết tay và tiếng Việt có dấu, giải mã từng nét chữ với độ chính xác cao.
+  - **Tầng 3 (Language Modeling):** Thuật toán n-gram & khoảng cách Levenshtein kết hợp kho từ điển 74.000 từ vựng tiếng Việt chuẩn, tự động sửa lỗi dấu thanh đồng thời bảo toàn 100% mã số thuế, email, website và ký hiệu kỹ thuật.
+- ✨ **Tùy chọn AI Vision Đám Mây (Google Gemini Vision API):**
+  - Hỗ trợ mô hình `gemini-2.5-flash` / `gemini-3.5-flash` khi cần đối soát chữ viết tay siêu phức tạp qua mạng.
+  - Tích hợp quản lý API Key an toàn trong hệ điều hành Windows.
 
-### 4. 📄 Xuất PDF Siêu Phân Giải & Tìm kiếm được (Searchable PDF)
+### 4. 🚀 Tối ưu hóa hiệu năng & Hỗ trợ chuẩn JPEG XL (JXL)
+- **Hỗ trợ định dạng ảnh tiên tiến JPEG XL (`.jxl`):** Xử lý trực tiếp các kho ảnh nén chất lượng cao thế hệ mới.
+- **Cơ chế nạp lười thông minh (Lazy Loading & Smart Pagination):** Đọc trơn tru thư mục chứa **5.000+ bức ảnh** chỉ với ~75MB RAM thay vì hàng chục GB, ngăn ngừa hoàn toàn hiện tượng tràn bộ nhớ hay treo ứng dụng.
+- **Giao diện đáp ứng (Adaptive Responsive UI) & Khay hệ thống (System Tray):** Tự động căn chỉnh vừa vặn với mọi độ phân giải màn hình từ Laptop 1366x768 đến màn hình 4K; biểu tượng khay hệ thống giúp ứng dụng luôn sẵn sàng phục vụ.
+
+### 5. 📄 Xuất PDF Siêu Phân Giải & Tìm kiếm được (Searchable PDF)
 - **PDF Tìm kiếm được (Searchable PDF):** Tự động nhúng lớp chữ OCR ẩn chính xác từng tọa độ từ. Khi mở trên bất kỳ trình đọc PDF nào (Adobe Acrobat, Foxit Reader, Chrome, Edge), bạn có thể **tìm kiếm (Ctrl+F), bôi đen và sao chép (Copy) văn bản**.
 - **PDF Ảnh siêu phân giải (High-Res Image PDF):** Giữ trọn độ nét cao nhất cho nhu cầu in ấn và lưu trữ hồ sơ.
 - Đa dạng tùy chọn khổ trang: Khớp tỷ lệ ảnh gốc, Khổ A4 Dọc, Khổ A4 Ngang.
