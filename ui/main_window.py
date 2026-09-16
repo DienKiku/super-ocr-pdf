@@ -11,7 +11,8 @@ from PySide6.QtCore import Qt, QThread, Signal, QThreadPool, QRunnable
 from PySide6.QtGui import QAction, QKeySequence, QIcon
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
-    QTabWidget, QToolBar, QStatusBar, QMessageBox, QLabel
+    QTabWidget, QToolBar, QStatusBar, QMessageBox, QLabel,
+    QSystemTrayIcon, QMenu, QApplication
 )
 
 from core.enhancer import DocumentEnhancer, EnhanceParams
@@ -125,16 +126,34 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Super OCR & High-Res PDF Studio - Làm Nét Chữ Siêu Phân Giải & Xuất PDF")
-        self.resize(1280, 800)
+
+        # Cấu hình kích thước thích ứng tự động với mọi độ phân giải màn hình
+        self.setMinimumSize(850, 520)
+        screen = QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            # Màn hình nhỏ (<= 1440x900 như laptop 1366x768 hoặc 1280x720) tự động mở rộng tối đa
+            if avail.width() <= 1440 or avail.height() <= 900:
+                self.showMaximized()
+            else:
+                w = min(1360, int(avail.width() * 0.90))
+                h = min(880, int(avail.height() * 0.90))
+                self.resize(w, h)
+                self.move(
+                    avail.x() + (avail.width() - w) // 2,
+                    avail.y() + (avail.height() - h) // 2
+                )
+        else:
+            self.resize(1200, 750)
 
         # Cài đặt Logo cho cửa sổ ứng dụng (ưu tiên logo.ico trong suốt đa độ phân giải)
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        ico_path = os.path.join(base_dir, "assets", "logo.ico")
-        png_path = os.path.join(base_dir, "assets", "logo.png")
-        if os.path.exists(ico_path):
-            self.setWindowIcon(QIcon(ico_path))
-        elif os.path.exists(png_path):
-            self.setWindowIcon(QIcon(png_path))
+        self.ico_path = os.path.join(base_dir, "assets", "logo.ico")
+        self.png_path = os.path.join(base_dir, "assets", "logo.png")
+        if os.path.exists(self.ico_path):
+            self.setWindowIcon(QIcon(self.ico_path))
+        elif os.path.exists(self.png_path):
+            self.setWindowIcon(QIcon(self.png_path))
 
         self._enhance_req_id = 0
         self._active_enhance_workers: List[AsyncEnhanceWorker] = []
@@ -145,7 +164,48 @@ class MainWindow(QMainWindow):
         self._init_ui()
         self._init_toolbar()
         self._init_statusbar()
+        self._init_tray()
         self._connect_signals()
+
+    def _init_tray(self):
+        """Khởi tạo biểu tượng Khay hệ thống (System Tray) đồng bộ với ứng dụng."""
+        if os.path.exists(self.ico_path):
+            tray_icon = QIcon(self.ico_path)
+        elif os.path.exists(self.png_path):
+            tray_icon = QIcon(self.png_path)
+        else:
+            tray_icon = self.windowIcon()
+
+        self.tray = QSystemTrayIcon(tray_icon, self)
+        self.tray.setToolTip("Super OCR & High-Res PDF Studio - 100% Offline Deep AI")
+
+        tray_menu = QMenu(self)
+        act_open = tray_menu.addAction("🖥️ Mở giao diện ứng dụng")
+        act_open.triggered.connect(self._restore_from_tray)
+
+        tray_menu.addSeparator()
+        act_scan = tray_menu.addAction("🔍 Quét OCR trang hiện tại")
+        act_scan.triggered.connect(self._run_ocr_current)
+
+        act_export = tray_menu.addAction("🚀 Xuất PDF Siêu phân giải")
+        act_export.triggered.connect(self._open_export_dialog)
+
+        tray_menu.addSeparator()
+        act_quit = tray_menu.addAction("❌ Thoát ứng dụng")
+        act_quit.triggered.connect(QApplication.instance().quit)
+
+        self.tray.setContextMenu(tray_menu)
+        self.tray.activated.connect(self._on_tray_activated)
+        self.tray.show()
+
+    def _on_tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
+            self._restore_from_tray()
+
+    def _restore_from_tray(self):
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
 
     def _cleanup_enhance_worker(self, worker: AsyncEnhanceWorker):
         if worker in self._active_enhance_workers:
@@ -183,8 +243,14 @@ class MainWindow(QMainWindow):
 
         self.splitter.addWidget(self.tabs)
 
-        # Initial splitter proportion
-        self.splitter.setSizes([260, 680, 340])
+        # Initial splitter proportion & stretch factors (Preview dynamically takes extra room)
+        self.splitter.setCollapsible(0, False)
+        self.splitter.setCollapsible(1, False)
+        self.splitter.setCollapsible(2, False)
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setStretchFactor(2, 0)
+        self.splitter.setSizes([250, 700, 330])
         main_layout.addWidget(self.splitter)
 
     def _init_toolbar(self):

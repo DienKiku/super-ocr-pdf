@@ -375,6 +375,40 @@ class TestSuperOCRPDF(unittest.TestCase):
             min_alpha = min(alpha_band.getchannel(0).tobytes() if hasattr(alpha_band, 'getchannel') else alpha_band.tobytes())
             self.assertEqual(min_alpha, 0, "Logo PNG must have 100% transparent pixels (alpha = 0)")
 
+    def test_11_jxl_and_system_tray(self):
+        """Test JXL format loading and SystemTrayIcon synchronization."""
+        from ui.image_list_widget import load_document_pages, generate_fast_thumbnail, SUPPORTED_ALL_EXTS
+        from ui.main_window import MainWindow
+        from PySide6.QtWidgets import QApplication
+
+        # 1. Test JXL format loading if tuning_data is present
+        tuning_dir = os.path.join(os.path.dirname(__file__), "tuning_data")
+        if os.path.exists(tuning_dir):
+            jxl_files = [f for f in os.listdir(tuning_dir) if f.endswith(".jxl")]
+            if jxl_files:
+                sample_jxl = os.path.join(tuning_dir, jxl_files[0])
+                self.assertTrue(".jxl" in SUPPORTED_ALL_EXTS, ".jxl must be supported")
+                pages = load_document_pages(sample_jxl)
+                self.assertGreater(len(pages), 0, "Must extract at least one page from JXL")
+                self.assertIsNotNone(pages[0][1], "Decoded image must not be None")
+                self.assertEqual(len(pages[0][1].shape), 3, "Decoded image must be 3-channel BGR")
+
+                # Test fast thumbnail
+                thumb = generate_fast_thumbnail(sample_jxl, 0)
+                self.assertIsNotNone(thumb, "Fast thumbnail should generate for JXL")
+                self.assertFalse(thumb.isNull(), "Thumbnail must not be null")
+
+        # 2. Test MainWindow System Tray and Screen Adaptation
+        app = QApplication.instance() or QApplication(sys.argv)
+        win = MainWindow()
+        self.assertIsNotNone(win.tray, "MainWindow must initialize SystemTrayIcon")
+        self.assertFalse(win.tray.icon().isNull(), "Tray icon must not be null")
+        self.assertGreaterEqual(win.width(), 850, "Window width must satisfy minimum size")
+        self.assertGreaterEqual(win.height(), 520, "Window height must satisfy minimum size")
+
+        win.tray.hide()
+        win.close()
+
 
 if __name__ == "__main__":
     unittest.main(warnings='ignore')

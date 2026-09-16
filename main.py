@@ -26,6 +26,21 @@ import traceback
 
 def safe_main():
     try:
+        # Register explicit AppUserModelID on Windows so Taskbar & Alt-Tab show custom logo
+        if sys.platform == 'win32':
+            try:
+                import ctypes
+                myappid = 'fami.superocrpdfstudio.app.3.4.0'
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+            except Exception:
+                pass
+
+        # Register JPEG XL support in Pillow
+        try:
+            import pillow_jxl  # noqa: F401
+        except ImportError:
+            pass
+
         # Enable high-DPI scaling
         QApplication.setHighDpiScaleFactorRoundingPolicy(
             Qt.HighDpiScaleFactorRoundingPolicy.PassThrough

@@ -62,6 +62,7 @@ class CanvasWidget(QWidget):
 
     def reset_view_fit(self):
         """Scale and center image to fit within canvas."""
+        self._is_fit_mode = True
         ref_img = self.enhanced_qimg or self.original_qimg
         if ref_img is None or ref_img.isNull():
             self.scale = 1.0
@@ -85,6 +86,7 @@ class CanvasWidget(QWidget):
 
     def reset_view_1to1(self):
         """Set zoom to 100% actual pixels."""
+        self._is_fit_mode = False
         ref_img = self.enhanced_qimg or self.original_qimg
         if ref_img is None:
             return
@@ -94,6 +96,19 @@ class CanvasWidget(QWidget):
         self.offset_x = (cw - ref_img.width()) / 2.0
         self.offset_y = (ch - ref_img.height()) / 2.0
         self.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        ref_img = self.enhanced_qimg or self.original_qimg
+        if ref_img is not None and not ref_img.isNull():
+            if getattr(self, '_is_fit_mode', True):
+                self.reset_view_fit()
+            else:
+                cw = self.width()
+                ch = self.height()
+                self.offset_x = (cw - ref_img.width() * self.scale) / 2.0
+                self.offset_y = (ch - ref_img.height() * self.scale) / 2.0
+                self.update()
 
     def set_view_mode(self, mode: str):
         self.view_mode = mode
@@ -267,6 +282,7 @@ class CanvasWidget(QWidget):
         if ref_img is None:
             return
 
+        self._is_fit_mode = False
         angle = event.angleDelta().y()
         factor = 1.15 if angle > 0 else 1.0 / 1.15
 
