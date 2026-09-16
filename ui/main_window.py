@@ -127,11 +127,14 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Super OCR & High-Res PDF Studio - Làm Nét Chữ Siêu Phân Giải & Xuất PDF")
         self.resize(1280, 800)
 
-        # Cài đặt Logo cho cửa sổ ứng dụng
+        # Cài đặt Logo cho cửa sổ ứng dụng (ưu tiên logo.ico trong suốt đa độ phân giải)
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        icon_path = os.path.join(base_dir, "assets", "logo.png")
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        ico_path = os.path.join(base_dir, "assets", "logo.ico")
+        png_path = os.path.join(base_dir, "assets", "logo.png")
+        if os.path.exists(ico_path):
+            self.setWindowIcon(QIcon(ico_path))
+        elif os.path.exists(png_path):
+            self.setWindowIcon(QIcon(png_path))
 
         self._enhance_req_id = 0
         self._active_enhance_workers: List[AsyncEnhanceWorker] = []
@@ -190,13 +193,15 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         # Add Files
-        action_add_files = QAction("➕ Thêm ảnh", self)
+        action_add_files = QAction("➕ Thêm tệp / PDF", self)
+        action_add_files.setToolTip("Thêm hình ảnh hoặc tài liệu PDF")
         action_add_files.setShortcut(QKeySequence.Open)
         action_add_files.triggered.connect(self.image_list.prompt_add_files)
         toolbar.addAction(action_add_files)
 
         # Add Folder
         action_add_folder = QAction("📁 Thêm thư mục", self)
+        action_add_folder.setToolTip("Thêm tất cả hình ảnh & tài liệu PDF từ thư mục")
         action_add_folder.triggered.connect(self.image_list.prompt_add_folder)
         toolbar.addAction(action_add_folder)
 

@@ -297,6 +297,84 @@ class TestSuperOCRPDF(unittest.TestCase):
         self.assertLess(pipeline_out.shape[1], table_w)
         print(f"\n[Test] Auto-Crop & Flatten: Table ({table_w}x{table_h}) -> Document ({pipeline_out.shape[1]}x{pipeline_out.shape[0]})")
 
+    def test_09_folder_and_multipage_loader(self):
+        """Test natural sorting and multi-page loader (images + PDF + JFIF)."""
+        from ui.image_list_widget import load_document_pages, natural_sort_key, SUPPORTED_ALL_EXTS, ImageListWidget
+        import tempfile
+        import shutil
+        from PIL import Image
+
+        # Test natural sort key
+        unsorted = ["doc_10.png", "doc_1.png", "doc_2.png", "doc_20.png"]
+        sorted_res = sorted(unsorted, key=natural_sort_key)
+        self.assertEqual(sorted_res, ["doc_1.png", "doc_2.png", "doc_10.png", "doc_20.png"])
+
+        # Test temporary folder loading
+        temp_dir = tempfile.mkdtemp(prefix="test_ocr_folder_")
+        try:
+            # 1. Write sample images
+            cv2.imwrite(os.path.join(temp_dir, "doc_1.png"), self.test_img)
+            cv2.imwrite(os.path.join(temp_dir, "doc_2.png"), self.test_img)
+            cv2.imwrite(os.path.join(temp_dir, "doc_10.png"), self.test_img)
+
+            # 2. Write a 2-page PDF
+            pdf_doc = pymupdf.open()
+            pdf_doc.new_page(width=200, height=200)
+            pdf_doc.new_page(width=200, height=200)
+            pdf_path = os.path.join(temp_dir, "multi_page.pdf")
+            pdf_doc.save(pdf_path)
+            pdf_doc.close()
+
+            # 3. Write a JFIF image
+            jfif_path = os.path.join(temp_dir, "test_scan.jfif")
+            pil_img = Image.fromarray(cv2.cvtColor(self.test_img, cv2.COLOR_BGR2RGB))
+            pil_img.save(jfif_path, format="JPEG")
+
+            # Collect paths as prompt_add_folder would
+            found_paths = []
+            for root, dirs, files in os.walk(temp_dir):
+                dirs.sort(key=natural_sort_key)
+                for f in sorted(files, key=natural_sort_key):
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in SUPPORTED_ALL_EXTS:
+                        found_paths.append(os.path.join(root, f))
+
+            self.assertEqual(len(found_paths), 5)
+
+            # Test ImageListWidget
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance() or QApplication(sys.argv)
+            widget = ImageListWidget()
+            widget.add_images(found_paths)
+
+            # 3 PNGs + 1 JFIF + 2 pages from PDF = 6 total items
+            self.assertEqual(len(widget.items), 6, f"Expected 6 items, got {len(widget.items)}")
+            
+            # Check filename formatting
+            filenames = [item.filename for item in widget.items]
+            self.assertTrue(any("Trang 1/2" in fn for fn in filenames))
+            self.assertTrue(any("Trang 2/2" in fn for fn in filenames))
+            self.assertTrue(any("doc_1.png" in fn for fn in filenames))
+            self.assertTrue(any("test_scan.jfif" in fn for fn in filenames))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_10_app_icon_transparency(self):
+        """Verify that assets/logo.png and assets/logo.ico exist with true alpha transparency."""
+        from PIL import Image
+
+        logo_png = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
+        logo_ico = os.path.join(os.path.dirname(__file__), "assets", "logo.ico")
+
+        self.assertTrue(os.path.exists(logo_png), "assets/logo.png must exist")
+        self.assertTrue(os.path.exists(logo_ico), "assets/logo.ico must exist")
+
+        with Image.open(logo_png) as im:
+            self.assertEqual(im.mode, "RGBA", "Logo PNG must have RGBA format")
+            alpha_band = im.split()[-1]
+            min_alpha = min(alpha_band.getchannel(0).tobytes() if hasattr(alpha_band, 'getchannel') else alpha_band.tobytes())
+            self.assertEqual(min_alpha, 0, "Logo PNG must have 100% transparent pixels (alpha = 0)")
+
 
 if __name__ == "__main__":
     unittest.main(warnings='ignore')

@@ -42,10 +42,13 @@ def safe_main():
         # Apply modern dark theme
         app.setStyleSheet(DARK_THEME)
 
-        # Set application icon
+        # Set application icon (prioritize transparent multi-resolution .ico on Windows)
         base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+        ico_path = os.path.join(base_dir, "assets", "logo.ico")
         icon_path = os.path.join(base_dir, "assets", "logo.png")
-        if os.path.exists(icon_path):
+        if os.path.exists(ico_path):
+            app.setWindowIcon(QIcon(ico_path))
+        elif os.path.exists(icon_path):
             app.setWindowIcon(QIcon(icon_path))
 
         window = MainWindow()
