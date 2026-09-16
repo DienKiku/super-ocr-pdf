@@ -4,6 +4,7 @@ Integrates image list, split preview canvas, enhancement settings, and OCR panel
 """
 
 from typing import Optional, List
+import sys
 import os
 import cv2
 import numpy as np
@@ -147,9 +148,9 @@ class MainWindow(QMainWindow):
             self.resize(1200, 750)
 
         # Cài đặt Logo cho cửa sổ ứng dụng (ưu tiên logo.ico trong suốt đa độ phân giải)
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.ico_path = os.path.join(base_dir, "assets", "logo.ico")
-        self.png_path = os.path.join(base_dir, "assets", "logo.png")
+        from core.windows_integration import get_asset_path, apply_native_window_icon
+        self.ico_path = get_asset_path("logo.ico")
+        self.png_path = get_asset_path("logo.png")
         if os.path.exists(self.ico_path):
             self.setWindowIcon(QIcon(self.ico_path))
         elif os.path.exists(self.png_path):
@@ -559,9 +560,15 @@ class MainWindow(QMainWindow):
         dialog = ExportDialog(self.image_list.items, self)
         dialog.exec()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        if sys.platform == 'win32' and hasattr(self, 'ico_path'):
+            from core.windows_integration import apply_native_window_icon
+            apply_native_window_icon(int(self.winId()), self.ico_path)
+
     def _show_about(self):
         msg = (
-            "<h3>Super OCR & High-Res PDF Studio (v3.4.0)</h3>"
+            "<h3>Super OCR & High-Res PDF Studio (v3.4.1)</h3>"
             "<p><b>Phần mềm phục chế làm nét văn bản, quét OCR 100% Cục Bộ và xuất PDF siêu phân giải</b></p>"
             "<ul>"
             "<li><b>Làm nét chữ:</b> Unsharp Masking, CLAHE, lọc viền chi tiết, khử nhòe mờ</li>"

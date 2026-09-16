@@ -2,9 +2,9 @@
 
 ![Super OCR & High-Res PDF Studio](assets/github_cover.png)
 
-# 🚀 Super OCR & High-Res PDF Studio (v3.4.0)
+# 🚀 Super OCR & High-Res PDF Studio (v3.4.1)
 
-[![GitHub Release](https://img.shields.io/badge/Release-v3.4.0-00d2ff?style=for-the-badge&logo=github)](https://github.com/DienKiku/super-ocr-pdf/releases)
+[![GitHub Release](https://img.shields.io/badge/Release-v3.4.1-00d2ff?style=for-the-badge&logo=github)](https://github.com/DienKiku/super-ocr-pdf/releases)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(64--bit)-0078d7?style=for-the-badge&logo=windows)](https://github.com/DienKiku/super-ocr-pdf)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab?style=for-the-badge&logo=python)](https://www.python.org/)
 [![AI Engine](https://img.shields.io/badge/AI%20OCR-100%25%20Offline%20%7C%20PaddleOCR%20%2B%20VietOCR-00f2fe?style=for-the-badge)](https://github.com/DienKiku/super-ocr-pdf)

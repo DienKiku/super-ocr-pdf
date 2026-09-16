@@ -1,6 +1,6 @@
 """
 Entry point for Super OCR & High-Res PDF Studio.
-Version: 3.4.0 (100% Offline Deep Vietnamese OCR & Language Model)
+Version: 3.4.1 (100% Offline Deep Vietnamese OCR & Language Model)
 Updated: 2026-09-16 by Fami (fami_7006)
 """
 
@@ -19,21 +19,19 @@ from PySide6.QtGui import QFont, QIcon
 
 from ui.main_window import MainWindow
 from ui.styles import DARK_THEME
-
+from core.windows_integration import (
+    setup_windows_integration,
+    apply_native_window_icon,
+    get_asset_path,
+)
 
 import traceback
 
 
 def safe_main():
     try:
-        # Register explicit AppUserModelID on Windows so Taskbar & Alt-Tab show custom logo
-        if sys.platform == 'win32':
-            try:
-                import ctypes
-                myappid = 'fami.superocrpdfstudio.app.3.4.0'
-                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-            except Exception:
-                pass
+        # Register explicit AppUserModelID, HKCU registry, and Start Menu shortcut
+        setup_windows_integration()
 
         # Register JPEG XL support in Pillow
         try:
@@ -58,16 +56,19 @@ def safe_main():
         app.setStyleSheet(DARK_THEME)
 
         # Set application icon (prioritize transparent multi-resolution .ico on Windows)
-        base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-        ico_path = os.path.join(base_dir, "assets", "logo.ico")
-        icon_path = os.path.join(base_dir, "assets", "logo.png")
+        ico_path = get_asset_path("logo.ico")
+        png_path = get_asset_path("logo.png")
         if os.path.exists(ico_path):
             app.setWindowIcon(QIcon(ico_path))
-        elif os.path.exists(icon_path):
-            app.setWindowIcon(QIcon(icon_path))
+        elif os.path.exists(png_path):
+            app.setWindowIcon(QIcon(png_path))
 
         window = MainWindow()
         window.show()
+
+        # Ensure native Windows 11 Taskbar & Alt-Tab icons are applied to HWND
+        if sys.platform == 'win32':
+            apply_native_window_icon(int(window.winId()), ico_path)
 
         sys.exit(app.exec())
     except Exception as e:
