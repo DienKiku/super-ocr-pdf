@@ -409,6 +409,7 @@ class MainWindow(QMainWindow):
         for w in self._active_ocr_workers:
             w.cancel()
 
+        engine_mode = self.ocr_panel.get_selected_engine()
         mode_label = "100% Offline (DBNet + VietOCR + LM)"
 
         # For OCR: use clean original image (rotated if user adjusted orientation)
