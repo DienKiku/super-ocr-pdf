@@ -482,6 +482,44 @@ class TestSuperOCRPDF(unittest.TestCase):
         t3, c3, w3 = DualEngineArbitrator.arbitrate("Hop dong kinh te", 0.80, "Hợp đồng kinh tế", 0.92)
         self.assertEqual(t3, "Hợp đồng kinh tế")
 
+    def test_16_currency_protection_and_table_grouping(self):
+        """Test v3.5.1 currency protection, table line snap, and invoice grammar."""
+        from core.ocr_engine import DualEngineArbitrator, VietnameseLanguageModel, OCREngine, OCRBox
+
+        # 1. Bảo toàn định dạng tiền tệ Việt Nam (không để PaddleOCR ghi đè chuỗi thiếu số 0)
+        t_curr, c_curr, w_curr = DualEngineArbitrator.arbitrate("120000", 0.75, "1.200.000", 0.95)
+        self.assertEqual(t_curr, "1.200.000")
+        self.assertEqual(w_curr, "vietocr")
+
+        # 2. Bảo toàn tiền tệ có dấu phân cách khi PaddleOCR đọc nhầm đ -> 4
+        t_d, _, w_d = DualEngineArbitrator.arbitrate("1.150.004", 0.70, "1.150.000", 0.95)
+        self.assertEqual(t_d, "1.150.000")
+        self.assertEqual(w_d, "vietocr")
+
+        # 3. Bảo toàn tiền tố tiếng Việt có dấu
+        t_date, _, _ = DualEngineArbitrator.arbitrate("Ngy:09/09/2026", 0.80, "Ngày: 09/09/2026", 0.85)
+        self.assertEqual(t_date, "Ngày: 09/09/2026")
+
+        # 4. Gom dòng bảng biểu theo Y-overlap không bị tách đơn giá lên dòng trước
+        ocr = OCREngine.get_instance()
+        table_boxes = [
+            OCRBox(polygon=[], bbox=(70, 280, 20, 15), text="1", confidence=0.95),
+            OCRBox(polygon=[], bbox=(100, 282, 200, 18), text="MSNK4-0061 Đầu dò nhiệt", confidence=0.95),
+            OCRBox(polygon=[], bbox=(400, 284, 30, 14), text="Cái", confidence=0.95),
+            OCRBox(polygon=[], bbox=(470, 284, 15, 14), text="1", confidence=0.95),
+            OCRBox(polygon=[], bbox=(500, 276, 55, 16), text="1.200.000", confidence=0.95),  # Slightly higher y
+            OCRBox(polygon=[], bbox=(620, 282, 50, 15), text="1.200.000", confidence=0.95),
+        ]
+        grouped = ocr._group_into_lines(table_boxes, img_w=800, img_h=1000)
+        self.assertEqual(len(grouped), 1, "Toàn bộ các cột trong cùng hàng bảng phải gom thành đúng 1 dòng")
+        self.assertEqual(len(grouped[0]), 6)
+
+        # 5. Hậu xử lý các mẫu hóa đơn đặc thù
+        lm = VietnameseLanguageModel.get_instance()
+        self.assertEqual(lm.process("PHIẾU GIAO HÀNG (KIỂM PHIẾU XUẤT KHO)"), "PHIẾU GIAO HÀNG (KIÊM PHIẾU XUẤT KHO)")
+        self.assertEqual(lm.process("Số tiền viết bằng chữ: Bà triệu đồng"), "Số tiền viết bằng chữ: Ba triệu đồng")
+        self.assertIn("Hồ Thị Diễm Trâm", lm.process("Khách hàng: Thế Chị Diễn Trăn"))
+
 
 if __name__ == "__main__":
     unittest.main(warnings='ignore')

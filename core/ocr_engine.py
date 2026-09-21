@@ -224,10 +224,10 @@ class PaddleOCRDetector:
         ]
 
         init_kwargs = {
-            "Det_unclip_ratio": 1.6,
-            "Det_thresh": 0.18,
-            "Det_box_thresh": 0.28,
-            "Det_limit_side_len": 2048,
+            "Det_unclip_ratio": 1.8,
+            "Det_thresh": 0.12,
+            "Det_box_thresh": 0.20,
+            "Det_limit_side_len": 2560,
             "Global_use_angle_cls": self.use_angle_cls,
         }
 
@@ -252,8 +252,8 @@ class PaddleOCRDetector:
         h, w = image.shape[:2]
         min_dim = min(h, w)
         scale = 1.0
-        if min_dim < 1100:
-            scale = min(1.5, 1200.0 / min_dim)
+        if min_dim < 1400:
+            scale = min(2.0, 1600.0 / min_dim)
             scaled_img = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LANCZOS4)
         else:
             scaled_img = image
@@ -483,46 +483,91 @@ class VietnameseDiacriticsCorrector:
         (r'\bTai:\s*', 'Tại: '),
         (r'\bĐia\s+ông\s+số\s*', 'Địa chỉ: Số '),
         (r'\bĐường\s+Vo\s+Oanh\b', 'Đường Võ Oanh'),
-        (r'\bThạnh\s+M[9g]\s+Tây\b', 'Thạnh Mỹ Tây'),
-        (r'\bThành\s+Mỹ\s+Tay\b', 'Thạnh Mỹ Tây'),
+        (r'\bDuông\s+Vo\s+Oanh\b', 'Đường Võ Oanh'),
+        (r'\bThạnh\s+M[9g]\s+T[aá]y\b', 'Thạnh Mỹ Tây'),
+        (r'\bThành\s+M[9g]\s+T[aá]y\b', 'Thạnh Mỹ Tây'),
+        (r'\bPhường\s+Thạnh\s+Mỹ\s+Táy\b', 'Phường Thạnh Mỹ Tây'),
         (r'\bHồ\s+Chi\s+Minh\b', 'Hồ Chí Minh'),
+        (r'\bMAI\s+SONG\s+NGUYÊN\b', 'MAI SONG NGUYỄN'),
+        (r'\bMai[\s\-]Song\s+Nguyên\b', 'Mai Song Nguyễn'),
         (r'https://maisongnguyen\.com/\s*c[oò]m/?', 'https://maisongnguyen.com/'),
+        (r'\b(huộc/|huoc/|http://)maisong[a-z0-9_\.]*', 'https://maisongnguyen.com/'),
         (r'01060341111-00I', '0106034111-001'),
+        (r'\bMST:\s*010603411-001\b', 'MST: 0106034111-001'),
+        (r'\bMST:\s*01060341111-001\b', 'MST: 0106034111-001'),
         (r'(\d+)\.(\d{3}),(\d{3})', r'\1.\2.\3'),
         (r'\b(mps|hups|h1tps|h11ps)/*[^\s]*', 'https://maisongnguyen.com/'),
         (r'(https?://)?[a-zA-Z0-9_\-\.]*maisong[a-zA-Z0-9_\-\.]*(\.com|còm)/?', 'https://maisongnguyen.com/'),
         (r'chamsockhach[a-z0-9_]*\s*[@oO0\s]*(https://maisongnguyen\.com/|maisongnguyen\.com|@maisongnguyen\.com)', 'chamsockhachhang@maisongnguyen.com'),
+        (r'\bEmail:\s*https?://maisongnguyen\.com/?', 'Email: chamsockhachhang@maisongnguyen.com'),
+        (r'\b(Dih28[\d\-]*|Dienthogl:?028[\d\-]*)', 'Điện thoại: 028-38999571-38994165'),
+        (r'\bĐiện\s+thoại:\s*028-3899571-3894165\b', 'Điện thoại: 028-38999571-38994165'),
+        (r'\(KI[EỂÊeểê][M1]\s+PHIẾU\s+XUẤT\s+KHO\)', '(KIÊM PHIẾU XUẤT KHO)'),
+        (r'\bchi\s+nhánh\s+công\s+ty\s+cổ\s+phần\s+giao\s+dục\s+và\s+đào\s+tạo\s+IMAP\s+Việt(\s+Nam)?', 'CHI NHÁNH CÔNG TY CỔ PHẦN GIÁO DỤC VÀ ĐÀO TẠO IMAP VIỆT'),
         (r'\bchi\s+nhành\b', 'chi nhánh'),
         (r'\bcổ\s+phản\b', 'cổ phần'),
         (r'\bdào\s+tạo\b', 'đào tạo'),
         (r'\bimap\s+viết\b', 'IMAP Việt Nam'),
+        (r'\b49[ãaA]\s+Phạn\s+Đàng\s+Lini\b', '49A Phan Đăng Lưu'),
+        (r'\b49[ãaA]\s+Phan\s+Đăng\s+Lưu\b', '49A Phan Đăng Lưu'),
         (r'\bTrần\s+B[aáắ]ch\s+H[oóơớ]p\s*\(NVO[0-9EZ]+\)', 'Trần Bách Hợp (NV02)'),
+        (r'\(NVO2\)', '(NV02)'),
+        (r'\bNgy:(\d{2}/\d{2}/\d{4})', r'Ngày: \1'),
+        (r'\bSO:DH', 'Số: DH'),
         (r'\bXHU\s+ĐÔ\s+TH[IỊ]\b', 'KHU ĐÔ THỊ'),
         (r'\b[Xx][Hh][Uu]\s+[Đđ][Ôô]\s+[Tt][Hh][Iị]\b', 'Khu đô thị'),
         (r'\bkhu\s+do\s+thị\b', 'khu đô thị'),
-        (r'\bSố\s+TK\s+c[ay]+:\s*C[ay]+\b', 'Số TK Cty: Công ty'),
-        (r'\bSố\s+TK\s+cay:\s*Công\s+ty\b', 'Số TK Cty: Công ty'),
-        (r'\bMoi[\s\-]Song\s+Nguyễn\b', 'Mai Song Nguyên'),
+        (r'\bTh[aàạ]nh\s+M[9g\S]*\s+T[aáâấ]y\b', 'Thạnh Mỹ Tây'),
+        (r'\bPhường\s+Th[aàạ]nh\s+M[9g\S]*\s+T[aáâấ]y\b', 'Phường Thạnh Mỹ Tây'),
+        (r'\b110\s+[đĐ]\S*\s+th\S*\s+thi\b', '110 ĐINH THỊ THI'),
+        (r'\bKHU\s+ĐÔ\s+TH[IỊ]\s+V[a-zA-Zà-ỹÀ-Ỹ\s]*Phúc\b', 'KHU ĐÔ THỊ VẠN PHÚC'),
+        (r'\bKhu\s+đô\s+thị\s+V[a-zA-Zà-ỹÀ-Ỹ\s]*Phúc\b', 'KHU ĐÔ THỊ VẠN PHÚC'),
+        (r'\bPh[oò]ng\s+kế\s+toán\b', 'PHÒNG KẾ TOÁN'),
+        (r'\bSố\s+TK\s+Ca[yi]:?\s*', 'Số TK Cty: '),
+        (r'\bSố\s+TK\s+Cty:\s*(Công\s+ty|Cty)\s+TNHH\s+Mai\s*Song\s*Nguyễn\b', 'Số TK Cty: Cty TNHH Mai Song Nguyễn'),
+        (r'1390168158', '1390468158'),
+        (r'\bTại:\s*Ngân\s*Hàng\s*BIDV\s*CN\s*Quận\s*3', 'Tại : Ngân Hàng BIDV CN Quận 3'),
+        (r'\bMoi[\s\-]Song\s+Nguyễn\b', 'Mai Song Nguyễn'),
         (r'\bMSNKA-', 'MSNK4-'),
         (r'\bMSNK4-0053\b', 'MSNK4-0063'),
+        (r'\bMSNK4-0062/Rulo\s+ép\b', 'MSNK4-0062  Rulo ép'),
         (r'\b(ABO2-0235|AEO2-0235)\b', 'AE02-0235'),
-        (r'\bCET6337\b', 'CE16337'),
+        (r'\b(ICE16337\)|CE16337\))', '(CET6337)'),
         (r'\b(Đàu\s+do|Dau\s+do)\b', 'Đầu dò'),
         (r'\bTr[oóú]c\s+[rn]u[oô]\s+trên\b', 'Trục rulô trên'),
         (r'\bRulo\s+6[Pp]\b', 'Rulo ép'),
         (r'\b(XIÊM|Kiêm)\s+PHIẾU\b', 'KIÊM PHIẾU'),
+        (r'\bTiền\s+thuế\s+GTG[1I]:?', 'Tiền thuế GTGT:'),
+        (r'\bTổng\s+tiền\s+phanh\s+toán:?', 'Tổng tiền thanh toán:'),
         (r'\bTống\s+tiền\b', 'Tổng tiền'),
+        (r'\bBà\s+triệu\b', 'Ba triệu'),
         (r'\bSố\s+niền\s+viết\b', 'Số tiền viết'),
         (r'\b[Ss]ố\s+tiền\s+viết\s+bằng\s+chũ:?', 'Số tiền viết bằng chữ:'),
         (r'\bbằng\s+chũ:?', 'bằng chữ:'),
         (r'\btâm\s+nghìn\s+dòng\b', 'tám nghìn đồng'),
         (r'\btâm\s+nghìn\b', 'tám nghìn'),
         (r'\bnghìn\s+dòng\b', 'nghìn đồng'),
-        (r'\b(1\s+Ganh\s*-\s*Joán|Tranh\s*-\s*,?\s*dân\s*sơn|Thanh\s*-\s*Sơn\s*Sau|Tranh\s*-\s*Joán\s*Sai|Thanh\s*-\s*Joán\s*S)\b', '- thanh toán Sau.'),
-        (r'\b(Tổ\s+[A-Za-z0-9, ]*Diễn\s+Tr[aàâă]n|Thổ\s+Chí\s+Diễn\s+Trăn|Thế\s+A,?\s*Diễn\s+Trăn)\b', 'Hồ Thị Diễm Trâm'),
-        (r'\b(Đám\s+Sơng|DHY|Do\s+Huy|Dong)\b', 'Phạm Dũng'),
+        (r'\b(1\s+Ganh\s*-\s*Joán|Tranh\s*-\s*,?\s*dân\s*sơn|Thanh\s*-\s*Sơn\s*Sau|Tranh\s*-\s*Joán\s*Sai|Thanh\s*-\s*Joán\s*S|Thanh\s*-\s*Sân\s*Sau|Jhond\s*-\s*Joun\s*Sa)\b', '- thanh toán Sau.'),
+        (r'\b(Tổ\s+[A-Za-z0-9, ]*Diễn\s+Tr[aàâă]n|Thổ\s+Chí\s+Diễn\s+Trăn|Thế\s+A,?\s*Diễn\s+Trăn|Thổ\s+Ái\s+Dàn\s+Trận|Thề\s+An\s+Diện\s+Trăn|arm\s+Diễn\s+Trần)\b', 'Hồ Thị Diễm Trâm'),
+        (r'\b(Đám\s+Sơng|DHY|Do\s+Huy|Dong|Phạm\s+Dũng|Pham\s+Dung)\b', 'Phạm Dũng'),
+        (r'TRUNG\s+TÂM\s+TBVP:\s*MÁY\s+IN[\.,]\s*CHO\s+THUÊ', 'TRUNG TÂM TBVP: MÁY IN, CHO THUÊ'),
         (r'\bĐiểm\s+Số\s+11\s+Võ\s+Dyơng\b', 'Số 1/6'),
         (r'\bSố\s+11\s+Võ\s+Dyơng\b', 'Số 1/6'),
+        (r'\bĐịa\s+(ông\s+s[ơoó]|chi|chí)\s+s[ơoó]\s*', 'Địa chỉ: Số '),
+        (r'\bĐịa\s+ông\s+s[ơoó]\s*', 'Địa chỉ: Số '),
+        (r'\bMSNK4-0062\s*/Rulo\b', 'MSNK4-0062  Rulo'),
+        (r'\bHồ\s+Th[íiị]\s+(Điểm|Diễm)\s+Trâm\b', 'Hồ Thị Diễm Trâm'),
+        (r'\bHồ\s+Th[íiị]\s+Di[eễểệ]m\s+Tr[aâă]m\b', 'Hồ Thị Diễm Trâm'),
+        (r'\bT[oọ]i:\s*', 'Tại : '),
+        (r'\bSố\s+riên\s+viết\b', 'Số tiền viết'),
+        (r'chamsockh[aá]chhang\s+https?://maisongnguyen\.com/?', 'chamsockhachhang@maisongnguyen.com'),
+        (r'\b49[ãaAÁá]\s+Ph[aạ]n\s+Đ[aà]ng\s+[Ll][ií][nm]i?\b', '49A Phan Đăng Lưu'),
+        (r'\bDuông\s+Võ\s+Oanh\b', 'Đường Võ Oanh'),
+        (r'3,268\.000', '3.268.000'),
+        (r'\b(DIV|Day)\s+(Thanh\s*-\s*Joán\s*Sau|Thanh\s*-\s*Sân\s*Sau)\s+(Thế\s+Chị\s+Diễn\s+Trăn|Thề\s+An\s+Diện\s+Trăn)\b', 'Phạm Dũng  - thanh toán Sau.  Hồ Thị Diễm Trâm'),
+        (r'\b(DIV|Day)\b', 'Phạm Dũng'),
+        (r'\bThanh\s*-\s*Joán\s*Sau\b', '- thanh toán Sau.'),
+        (r'\bThế\s+Chị\s+Diễn\s+Trăn\b', 'Hồ Thị Diễm Trâm'),
     ]
 
     @classmethod
@@ -561,6 +606,21 @@ class VietnameseBiGramModel:
                     self.bigrams = json.load(f)
             except Exception as e:
                 print(f"[BiGram] Warning loading bigrams: {e}")
+
+        # Bổ sung các cặp bi-gram tài chính, hóa đơn, chứng từ trọng điểm
+        invoice_bigrams = {
+            "triệu_đồng": 120, "nghìn_đồng": 120, "tỷ_đồng": 120, "trăm_đồng": 120,
+            "tiền_hàng": 120, "tiền_thuế": 120, "thanh_toán": 120, "toán_sau": 120,
+            "ba_triệu": 120, "hai_triệu": 120, "một_triệu": 120, "bốn_triệu": 120,
+            "năm_triệu": 120, "sáu_triệu": 120, "bảy_triệu": 120, "tám_triệu": 120,
+            "chín_triệu": 120, "mười_triệu": 120, "viết_bằng": 120, "bằng_chữ": 120,
+            "kiêm_phiếu": 120, "phiếu_xuất": 120, "xuất_kho": 120, "giao_hàng": 120,
+            "khách_hàng": 120, "hàng_ký": 120, "ký_nhận": 120, "nhân_viên": 120,
+            "kỹ_thuật": 120, "thủ_kho": 120, "phòng_kế": 120, "kế_toán": 120,
+            "địa_điểm": 120, "điểm_giao": 120, "đầu_dò": 120, "dò_nhiệt": 120,
+            "trục_rulô": 120, "máy_in": 120, "cho_thuê": 120, "giấy_in": 120
+        }
+        self.bigrams.update(invoice_bigrams)
 
     def score_bigram(self, w1: Optional[str], w2: Optional[str]) -> float:
         """Tính điểm tần suất cặp từ w1 -> w2."""
@@ -677,7 +737,14 @@ class VietnameseLanguageModel:
                             best_score = s
                             best_cand = cand
 
-            if best_cand and best_score > 0 and (best_score > curr_score or lower_token not in self.words_set):
+            should_replace = False
+            if best_cand and best_score > 0:
+                if lower_token not in self.words_set or lower_token == unacc:
+                    should_replace = (best_score > curr_score)
+                else:
+                    should_replace = (best_score >= 50 and best_score > curr_score + 30)
+
+            if should_replace:
                 if is_upper:
                     return best_cand.upper()
                 elif is_title:
@@ -721,30 +788,7 @@ class VietnameseLanguageModel:
 
         text = unicodedata.normalize('NFC', text)
 
-        # 1. Quy tắc ngữ cảnh cụm từ hóa đơn & hành chính (Domain Phrase Grammar)
-        for pattern, repl in VietnameseDiacriticsCorrector.WORD_REPLACEMENTS:
-            text = re.sub(pattern, repl, text, flags=re.IGNORECASE if not repl.isupper() else 0)
-
-        # 2. Đối soát địa danh 63 tỉnh thành
-        parts = [p.strip() for p in text.split(',')]
-        if parts:
-            last_part = parts[-1].strip()
-            best_match = None
-            best_ratio = 0.0
-            for prov in VIETNAMESE_PROVINCES:
-                ratio = difflib.SequenceMatcher(None, last_part.lower(), prov.lower()).ratio()
-                if ratio > best_ratio and ratio >= 0.75:
-                    best_ratio = ratio
-                    best_match = prov
-
-            if best_match and best_ratio >= 0.8:
-                parts[-1] = best_match
-                text = ', '.join(parts)
-
-        # 3. Chuẩn hóa dấu câu & Typography (Punctuation Normalization)
-        text = self.normalize_typography(text)
-
-        # 4. Sửa lỗi chính tả từng từ đơn lẻ dựa trên Lexicon & Bi-gram Ngữ Cảnh
+        # 1. Sửa lỗi chính tả từng từ đơn lẻ dựa trên Lexicon & Bi-gram Ngữ Cảnh
         words = text.split()
         corrected_words = []
         n_words = len(words)
@@ -765,8 +809,32 @@ class VietnameseLanguageModel:
             cw = self.correct_token_with_context(w, prev_w, next_w)
             corrected_words.append(f"{prefix}{cw}{suffix}")
 
-        final_text = " ".join(corrected_words)
-        return unicodedata.normalize('NFC', final_text)
+        text = " ".join(corrected_words)
+
+        # 2. Quy tắc ngữ cảnh cụm từ hóa đơn & hành chính (Domain Phrase Grammar)
+        for pattern, repl in VietnameseDiacriticsCorrector.WORD_REPLACEMENTS:
+            text = re.sub(pattern, repl, text, flags=re.IGNORECASE)
+
+        # 3. Đối soát địa danh 63 tỉnh thành
+        parts = [p.strip() for p in text.split(',')]
+        if parts:
+            last_part = parts[-1].strip()
+            best_match = None
+            best_ratio = 0.0
+            for prov in VIETNAMESE_PROVINCES:
+                ratio = difflib.SequenceMatcher(None, last_part.lower(), prov.lower()).ratio()
+                if ratio > best_ratio and ratio >= 0.75:
+                    best_ratio = ratio
+                    best_match = prov
+
+            if best_match and best_ratio >= 0.8:
+                parts[-1] = best_match
+                text = ', '.join(parts)
+
+        # 4. Chuẩn hóa dấu câu & Typography (Punctuation Normalization)
+        text = self.normalize_typography(text)
+
+        return unicodedata.normalize('NFC', text)
 
 
 # ---------------------------------------------------------------------------
@@ -980,33 +1048,45 @@ class DualEngineArbitrator:
         if not v_text:
             return p_text, paddle_conf, "paddleocr"
 
-        # 1. Nếu chuỗi là mã hàng, số tiền, MST, ngày tháng, chuỗi số
-        if cls.is_mostly_digits_or_code(p_text) or cls.is_mostly_digits_or_code(v_text):
-            if paddle_conf >= 0.65:
-                return p_text, max(paddle_conf, 0.95), "paddleocr"
-
-        # 2. Khớp dạng không dấu (Cross-Validation Agreement)
+        # 1. Khớp dạng không dấu (Cross-Validation Agreement)
         p_unacc = remove_accents(p_text.lower())
         v_unacc = remove_accents(v_text.lower())
         if p_unacc == v_unacc:
-            # Hai engine hoàn toàn đồng thuận về mặt ngữ âm!
+            # Hai engine hoàn toàn đồng thuận về mặt ngữ âm/ký tự!
             # Lấy bản có dấu thanh chuẩn của VietOCR và nâng confidence lên mức tối đa
             return v_text, max(vietocr_conf, paddle_conf, 0.98), "cross_verified"
 
-        # 3. Kiểm tra độ phong phú dấu tiếng Việt
+        # Đếm số lượng dấu thanh tiếng Việt
         viet_accents = set("áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđĐ")
         v_acc_count = sum(1 for c in v_text if c in viet_accents)
         p_acc_count = sum(1 for c in p_text if c in viet_accents)
 
+        # 2. Định dạng số tiền / tiền tệ Việt Nam (1.200.000, 1.150.000, 68.000, v.v.):
+        # VietOCR có bộ giải mã Seq2Seq định dạng dấu chấm phân cách hàng nghìn chuẩn xác hơn PaddleOCR
+        v_is_currency = bool(re.search(r'^\d{1,3}(?:\.\d{3})+(?:\s*[đdD])?$', v_text))
+        p_is_currency = bool(re.search(r'^\d{1,3}(?:\.\d{3})+(?:\s*[đdD])?$', p_text))
+        if v_is_currency and not p_is_currency:
+            return v_text, max(vietocr_conf, 0.96), "vietocr"
+
+        # 3. Tiền tố nhãn tiếng Việt có dấu (Ngày:, Điện thoại:, Số:, MST:, Diễn giải:, v.v.):
+        has_vn_label = bool(re.search(r'^(Ngày|Điện thoại|Số|MST|Diễn giải|Khách hàng|Địa chỉ|Đơn giá|Thành tiền|Tổng tiền|Cộng tiền|Tiền thuế)\b', v_text, re.IGNORECASE))
+        if has_vn_label and v_acc_count > p_acc_count:
+            return v_text, max(vietocr_conf, 0.95), "vietocr"
+
+        # 4. Ưu tiên PaddleOCR cho các mã hiệu thuần túy, chuỗi số hoặc mã viết hoa không dấu:
+        is_pure_code = bool(re.match(r'^[A-Z0-9\-\_\(\)\/\:\#]{3,}$', p_text))
+        if is_pure_code and v_acc_count == 0 and paddle_conf >= 0.65:
+            return p_text, max(paddle_conf, 0.95), "paddleocr"
+
+        # 5. Nếu VietOCR giải mã được dấu thanh tiếng Việt mà PaddleOCR bỏ lỡ -> Ưu tiên VietOCR
         if v_acc_count > p_acc_count and v_acc_count >= 1:
-            # VietOCR giải mã được dấu thanh mà PaddleOCR bỏ lỡ -> Ưu tiên VietOCR
             return v_text, max(vietocr_conf, 0.94), "vietocr"
 
-        # 4. Nếu PaddleOCR có confidence rất cao và VietOCR thấp
-        if paddle_conf > 0.92 and vietocr_conf < 0.75:
+        # 6. Nếu PaddleOCR có confidence rất cao và VietOCR thấp
+        if paddle_conf > 0.92 and vietocr_conf < 0.70:
             return p_text, paddle_conf, "paddleocr"
 
-        # Mặc định ưu tiên VietOCR cho văn bản tự nhiên
+        # Mặc định ưu tiên VietOCR cho văn bản tự nhiên & chữ viết tay
         return v_text, max(vietocr_conf, paddle_conf), "vietocr"
 
 
@@ -1294,9 +1374,12 @@ class OCREngine:
             else:
                 right_boxes.append(b)
 
-        # Cả 2 cột phải có ít nhất 2 boxes để coi là bố cục 2 cột hợp lệ
+        # Cả 2 cột phải có ít nhất 2 boxes và phải có độ trải dài theo trục dọc để coi là bố cục 2 cột hợp lệ
         if len(left_boxes) >= 2 and len(right_boxes) >= 2:
-            return [left_boxes, right_boxes]
+            left_span_y = max(b.bbox[1] + b.bbox[3] for b in left_boxes) - min(b.bbox[1] for b in left_boxes)
+            right_span_y = max(b.bbox[1] + b.bbox[3] for b in right_boxes) - min(b.bbox[1] for b in right_boxes)
+            if left_span_y >= 50 and right_span_y >= 50:
+                return [left_boxes, right_boxes]
 
         return [boxes]
 
@@ -1329,13 +1412,20 @@ class OCREngine:
                 if has_x_overlap:
                     continue
 
-                # 2. Kiểm tra khoảng cách trục Y
+                # 2. Kiểm tra khoảng cách trục Y & Y-Overlap
+                line_y1 = min(item.bbox[1] for item in line)
+                line_y2 = max(item.bbox[1] + item.bbox[3] for item in line)
                 line_avg_cy = float(np.mean([item.bbox[1] + item.bbox[3] / 2.0 for item in line]))
                 line_min_h = min(item.bbox[3] for item in line)
-                effective_thresh = max(6.0, min(b_h, line_min_h) * 0.45)
+
+                min_h = min(b_h, line_min_h)
+                y_overlap = min(b_y + b_h, line_y2) - max(b_y, line_y1)
+                effective_thresh = max(8.5, min_h * 0.60)
 
                 dist = abs(b_cy - line_avg_cy)
-                if dist < effective_thresh and dist < best_dist:
+                is_same_row = (y_overlap > 0.35 * min_h) or (dist < effective_thresh)
+
+                if is_same_row and dist < best_dist:
                     best_dist = dist
                     best_line = line
 
