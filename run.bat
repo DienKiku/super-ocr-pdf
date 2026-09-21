@@ -1,49 +1,58 @@
 @echo off
 chcp 65001 > nul
-title Super OCR & High-Res PDF Studio
+title Super OCR ^& High-Res PDF Studio
 
 echo ================================================================
-echo      SUPER OCR & HIGH-RES PDF STUDIO (LAM NET CHU & XUAT PDF)
+echo      SUPER OCR ^& HIGH-RES PDF STUDIO (LAM NET CHU ^& XUAT PDF)
 echo ================================================================
 echo.
 
 cd /d "%~dp0"
 
-:: 1. Neu da co ban build EXE san, uu tien khoi chay truc tiep khong can Python
+:: 1. Neu file .exe nam cung thu muc voi run.bat
+if exist "SuperOCRPDFStudio.exe" (
+    echo Dang khoi dong Super OCR PDF Studio...
+    start "" "SuperOCRPDFStudio.exe"
+    exit /b 0
+)
+
+:: 2. Neu da co ban build EXE trong thu muc dist
 if exist "dist\SuperOCRPDFStudio\SuperOCRPDFStudio.exe" (
     echo Phat hien ban ung dung doc lap (EXE), dang khoi dong truc tiep...
     start "" "dist\SuperOCRPDFStudio\SuperOCRPDFStudio.exe"
     exit /b 0
 )
 
-:: 2. Kiem tra xem may tinh da cai Python chua
+:: 3. Kiem tra xem may tinh da cai Python chua
 where python >nul 2>nul
 if errorlevel 1 (
     echo ================================================================
     echo [THONG BAO QUAN TRONG]
     echo May tinh cua ban CHUA CAI DAT PYTHON hoac CHUA THEM VAO PATH!
     echo.
-    echo De chay tu ma nguon, ban co 2 lua chon:
+    echo Vi ban dang su dung goi MA NGUON (Source Code), ban co 2 lua chon:
     echo.
-    echo   Cach 1 (Don gian nhat - Khong can Python):
-    echo     Chay file "build_exe.bat" tren may da cai dat, sau do copy
-    echo     toan bo thu muc "dist\SuperOCRPDFStudio" sang may nay.
+    echo   Cach 1 (DON GIAN NHAT - Khong can cai Python):
+    echo     Hay tai ban Portable da dong goi san .EXE tai link GitHub Releases:
+    echo     https://github.com/DienKiku/super-ocr-pdf/releases
+    echo     (Tai file: SuperOCRPDFStudio_v3.5.1_Portable_Win64.zip)
+    echo     Giai nen file ZIP va mo "SuperOCRPDFStudio.exe" la dung duoc ngay.
     echo.
-    echo   Cach 2:
+    echo   Cach 2 (Chay tu ma nguon):
     echo     1. Tai Python 3.11 hoac 3.12 (64-bit) tai: https://www.python.org/downloads/
     echo     2. Khi cai dat, NHO TICH VAO O: [x] "Add python.exe to PATH"
-    echo     3. Sau do mo lai file run.bat nay.
+    echo     3. Sau do mo lai file run.bat nay de tu dong cai thu vien va chay.
     echo ================================================================
     echo.
     pause
     exit /b 1
 )
 
-:: 3. Kiem tra phien ban Python (Yeu cau Python >= 3.10)
+:: 4. Kiem tra phien ban Python (Yeu cau Python >= 3.10)
 for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do set PY_VER=%%v
 echo Tim thay Python phien ban: %PY_VER%
 
-:: 4. Kiem tra va tu dong cai dat thu vien
+:: 5. Kiem tra va tu dong cai dat thu vien
 python -c "import PySide6, cv2, rapidocr_onnxruntime, pymupdf" 2>nul
 if errorlevel 1 (
     echo.
@@ -72,4 +81,3 @@ if errorlevel 1 (
     echo ================================================================
     pause
 )
-

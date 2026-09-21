@@ -1,17 +1,51 @@
 @echo off
 chcp 65001 > nul
-title Đóng gói Super OCR sang file EXE độc lập
+title Dong goi Super OCR sang file EXE doc lap
 
 echo ================================================================
-echo    DONG GOI SUPER OCR & HIGH-RES PDF STUDIO SANG TEP .EXE
+echo    DONG GOI SUPER OCR ^& HIGH-RES PDF STUDIO SANG TEP .EXE
 echo ================================================================
 echo.
+
+cd /d "%~dp0"
+
+:: Kiem tra xem Python co san tren may khong
+where python >nul 2>nul
+if errorlevel 1 (
+    echo ================================================================
+    echo [CHU Y] MAY TINH NAY CHUA CAI DAT PYTHON!
+    echo.
+    echo File "build_exe.bat" chi danh cho MAY LAP TRINH VIEN de dong goi
+    echo tu ma nguon sang file .EXE.
+    echo.
+    echo Neu ban muon CHAY UNG DUNG tren may nay:
+    echo   1. Hay tai goi PORTABLE da dong goi san tai:
+    echo      https://github.com/DienKiku/super-ocr-pdf/releases
+    echo      (File: SuperOCRPDFStudio_v3.5.1_Portable_Win64.zip)
+    echo   2. Giai nen va chay truc tiep SuperOCRPDFStudio.exe
+    echo      khong can cai dat Python hay bat ky thu vien nao.
+    echo ================================================================
+    echo.
+    pause
+    exit /b 1
+)
+
+:: Kiem tra PyInstaller
+where pyinstaller >nul 2>nul
+if errorlevel 1 (
+    echo [THONG BAO] Chua tim thay PyInstaller. Dang tien hanh cai dat...
+    pip install pyinstaller
+    if errorlevel 1 (
+        echo [LOI] Khong the cai dat PyInstaller. Vui long kiem tra ket noi mang.
+        pause
+        exit /b 1
+    )
+)
+
 echo Dang kiem tra moi truong va tien hanh dong goi bang PyInstaller...
 echo Vui long doi trong it phut de PyInstaller thu thap tat ca cac thu vien,
 echo mo hinh AI ONNX, trong so VietOCR va tap tin thuc thi...
 echo.
-
-cd /d "%~dp0"
 
 pyinstaller --noconfirm SuperOCRPDFStudio.spec
 
@@ -28,7 +62,7 @@ echo.
 echo ================================================================
 echo DONG GOI HOAN TAT THANH CONG!
 echo.
-echo ⚠️ LUU Y QUAN TRONG KHI MANG SANG MAY KHAC:
+echo [!] LUU Y QUAN TRONG KHI MANG SANG MAY KHAC:
 echo   Khong duoc chi copy moi file SuperOCRPDFStudio.exe!
 echo   Ban phai copy TOAN BO thu muc: "dist\SuperOCRPDFStudio"
 echo   (Bao gom ca file .exe va thu muc _internal ben canh).

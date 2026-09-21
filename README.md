@@ -59,11 +59,18 @@ Mã nguồn: [https://github.com/DienKiku/super-ocr-pdf](https://github.com/Dien
 
 ## 🛠️ Hướng dẫn cài đặt & Chạy ứng dụng
 
-### Yêu cầu hệ thống
-- Hệ điều hành: Windows 10 / 11 (64-bit)
-- Python 3.10 trở lên (nếu chạy từ mã nguồn)
+### 1. Dành cho người dùng thông thường (Khuyên dùng - Không cần cài Python)
+- Tải trực tiếp gói ứng dụng độc lập tại mục **[Releases](https://github.com/DienKiku/super-ocr-pdf/releases)**:
+  - Tải tệp: **`SuperOCRPDFStudio_v3.5.1_Portable_Win64.zip`**
+  - Giải nén tệp `.zip` vào bất kỳ thư mục nào trên máy tính.
+  - Nhấp đúp chuột vào **`SuperOCRPDFStudio.exe`** để mở ứng dụng ngay lập tức (100% đầy đủ thư viện & mô hình AI, không cần cài đặt gì thêm).
 
-### 1. Cài đặt môi trường từ mã nguồn
+### 2. Khởi chạy từ mã nguồn (Dành cho nhà phát triển)
+#### Yêu cầu hệ thống:
+- Hệ điều hành: Windows 10 / 11 (64-bit)
+- Python 3.10 trở lên (khuyên dùng Python 3.11 hoặc 3.12)
+
+#### Cách chạy:
 ```bash
 # Clone mã nguồn về máy
 git clone https://github.com/DienKiku/super-ocr-pdf.git
@@ -74,18 +81,16 @@ pip install -r requirements.txt
 
 # Khởi chạy ứng dụng
 python main.py
+# HOẶC nhấp đúp vào file run.bat để khởi động
 ```
 
-### 2. Khởi chạy nhanh bằng file Batch (Khuyên dùng trên Windows)
-- Nhấp đúp chuột vào file **`run.bat`** để khởi động phần mềm ngay lập tức.
-
-### 3. Đóng gói ra file `.EXE` độc lập (Không cần cài Python)
-- Nhấp đúp chuột vào file **`build_exe.bat`**.
-- Sau khi hoàn tất, ứng dụng độc lập sẽ sẵn sàng tại:
+### 3. Tự đóng gói ra file `.EXE` độc lập
+- Nhấp đúp chuột vào file **`build_exe.bat`** (yêu cầu máy đã cài Python và các thư viện).
+- Sau khi đóng gói hoàn tất, ứng dụng sẽ nằm tại:
   ```text
   dist\SuperOCRPDFStudio\SuperOCRPDFStudio.exe
+  dist\SuperOCRPDFStudio_v3.5.1_Portable_Win64.zip
   ```
-- Bạn có thể sao chép thư mục `dist\SuperOCRPDFStudio` sang bất kỳ máy tính Windows nào để sử dụng trực tiếp mà không cần cài đặt thêm phần mềm phụ trợ.
 
 ---
 
