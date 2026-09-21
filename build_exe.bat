@@ -36,9 +36,9 @@ echo.
 echo File chay nam tai: dist\SuperOCRPDFStudio\SuperOCRPDFStudio.exe
 echo.
 echo Dang tu dong nen thanh goi Portable ZIP de tien chia se...
-powershell -Command "Compress-Archive -Path 'dist\SuperOCRPDFStudio\*' -DestinationPath 'dist\SuperOCRPDFStudio_v3.4.1_Portable_Win64.zip' -Force" 2>nul
-if exist "dist\SuperOCRPDFStudio_v3.4.1_Portable_Win64.zip" (
-    echo Da tao goi nen thanh cong: dist\SuperOCRPDFStudio_v3.4.1_Portable_Win64.zip
+powershell -Command "Compress-Archive -Path 'dist\SuperOCRPDFStudio\*' -DestinationPath 'dist\SuperOCRPDFStudio_v3.5.0_Portable_Win64.zip' -Force" 2>nul
+if exist "dist\SuperOCRPDFStudio_v3.5.0_Portable_Win64.zip" (
+    echo Da tao goi nen thanh cong: dist\SuperOCRPDFStudio_v3.5.0_Portable_Win64.zip
     echo Ban chi can copy file ZIP nay sang bat ky may Windows nao, giai nen la chay duoc ngay!
 )
 echo ================================================================

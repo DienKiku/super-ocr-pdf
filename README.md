@@ -2,15 +2,15 @@
 
 ![Super OCR & High-Res PDF Studio](assets/github_cover.png)
 
-# 🚀 Super OCR & High-Res PDF Studio (v3.4.1)
+# 🚀 Super OCR & High-Res PDF Studio (v3.5.0)
 
-[![GitHub Release](https://img.shields.io/badge/Release-v3.4.1-00d2ff?style=for-the-badge&logo=github)](https://github.com/DienKiku/super-ocr-pdf/releases)
+[![GitHub Release](https://img.shields.io/badge/Release-v3.5.0-00d2ff?style=for-the-badge&logo=github)](https://github.com/DienKiku/super-ocr-pdf/releases)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(64--bit)-0078d7?style=for-the-badge&logo=windows)](https://github.com/DienKiku/super-ocr-pdf)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab?style=for-the-badge&logo=python)](https://www.python.org/)
-[![AI Engine](https://img.shields.io/badge/AI%20OCR-100%25%20Offline%20%7C%20PaddleOCR%20%2B%20VietOCR-00f2fe?style=for-the-badge)](https://github.com/DienKiku/super-ocr-pdf)
+[![AI Engine](https://img.shields.io/badge/AI%20OCR-Dual--Engine%20Voting%20%7C%20VietOCR%20%2B%20PaddleOCR-00f2fe?style=for-the-badge)](https://github.com/DienKiku/super-ocr-pdf)
 [![Formats](https://img.shields.io/badge/Formats-JPEG%20XL%20%7C%20PNG%20%7C%20JPG%20%7C%20PDF-brightgreen?style=for-the-badge)](https://github.com/DienKiku/super-ocr-pdf)
 
-Ứng dụng Desktop chuyên nghiệp dành cho Windows: **Phục chế làm nét chữ siêu phân giải (Super-Resolution), nhận diện OCR Tiếng Việt & Chữ viết tay thông minh 100% Offline, hỗ trợ ảnh JPEG XL (JXL) dung lượng lớn và xuất tệp PDF chất lượng cao (Searchable PDF & High-Res Image PDF)**.
+Ứng dụng Desktop chuyên nghiệp dành cho Windows: **Phục chế làm nét chữ siêu phân giải (Super-Resolution), nhận diện OCR Tiếng Việt & Chữ viết tay thông minh 100% Offline với cơ chế Nhận diện Kép (Dual-Engine Voting AI), hỗ trợ ảnh JPEG XL (JXL) dung lượng lớn và xuất tệp PDF chất lượng cao (Searchable PDF & High-Res Image PDF)**.
 
 Phát triển bởi: **Fami (fami_7006)**  
 Mã nguồn: [https://github.com/DienKiku/super-ocr-pdf](https://github.com/DienKiku/super-ocr-pdf)
@@ -37,14 +37,12 @@ Mã nguồn: [https://github.com/DienKiku/super-ocr-pdf](https://github.com/Dien
 - Kéo thanh trượt trực tiếp trên trang tài liệu để trực quan hóa sự khác biệt giữa **Ảnh gốc (Trước)** và **Ảnh đã phục chế làm nét (Sau)**.
 - Hỗ trợ phóng to/thu nhỏ (Zoom in/out), xem theo tỷ lệ chuẩn 100% (1:1), vừa khít khung nhìn (Fit to window) và di chuyển tự do (Pan).
 
-### 3. 📝 Hệ thống nhận diện OCR 100% Offline đột phá (Deep Learning Pipeline)
-- 🇻🇳 **Nhận diện Deep Learning 3 tầng (100% Offline - Không cần Internet):**
-  - **Tầng 1 (Line Detection):** Mô hình mạng nơ-ron **PaddleOCR DBNet (Differentiable Binarization)** khoanh vùng từng dòng chữ và khối văn bản chính xác tuyệt đối, không bỏ sót chữ nhỏ hay bảng biểu.
-  - **Tầng 2 (Sequence Recognition):** Mô hình **VietOCR Transformer Seq2Seq** chuyên biệt cho chữ viết tay và tiếng Việt có dấu, giải mã từng nét chữ với độ chính xác cao.
-  - **Tầng 3 (Language Modeling):** Thuật toán n-gram & khoảng cách Levenshtein kết hợp kho từ điển 74.000 từ vựng tiếng Việt chuẩn, tự động sửa lỗi dấu thanh đồng thời bảo toàn 100% mã số thuế, email, website và ký hiệu kỹ thuật.
-- ✨ **Tùy chọn AI Vision Đám Mây (Google Gemini Vision API):**
-  - Hỗ trợ mô hình `gemini-2.5-flash` / `gemini-3.5-flash` khi cần đối soát chữ viết tay siêu phức tạp qua mạng.
-  - Tích hợp quản lý API Key an toàn trong hệ điều hành Windows.
+### 3. 📝 Hệ thống nhận diện AI Dual-Engine 100% Offline đột phá
+- 🇻🇳 **Cơ chế Nhận diện Kép (Dual-Engine AI Voting & Fusion):**
+  - **Tầng 1 (Định vị & Cắt ảnh thích ứng):** Mô hình **PaddleOCR DBNet (PP-OCRv4)** định vị khung chữ $1:1$, kết hợp giải thuật **Dynamic Adaptive Padding** (16% chiều cao dòng) bảo vệ $100\%$ dấu thanh và đuôi chữ.
+  - **Tầng 2 (Phân tích bố cục đa cột XY-Cut):** Tự động phát hiện rãnh trắng (gutter) và tách cột độc lập, bảo toàn thứ tự đọc tự nhiên của tài liệu 2–3 cột.
+  - **Tầng 3 (Nhận diện Kép Song Song):** Kết hợp tốc độ và độ chuẩn xác số hiệu của **PaddleOCR SVTR-LCNet v4** cùng khả năng hiểu tiếng Việt ngữ cảnh của **VietOCR ResNet/VGG Transformer**. Bộ trọng tài tự động phân xử và cross-validation kết quả.
+  - **Tầng 4 (Mô hình Ngôn ngữ Bi-Gram LM):** Tra cứu từ điển 74.000 từ vựng và mạng lưới xác suất 48.000 cặp từ bi-gram, giải quyết triệt để các từ đa nghĩa bị mất dấu đồng thời bảo toàn 100% mã số thuế, email, website và ký hiệu kỹ thuật.
 
 ### 4. 🚀 Tối ưu hóa hiệu năng & Hỗ trợ chuẩn JPEG XL (JXL)
 - **Hỗ trợ định dạng ảnh tiên tiến JPEG XL (`.jxl`):** Xử lý trực tiếp các kho ảnh nén chất lượng cao thế hệ mới.

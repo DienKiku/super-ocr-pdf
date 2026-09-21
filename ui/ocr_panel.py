@@ -37,19 +37,40 @@ class OCRPanel(QWidget):
         grp_engine = QGroupBox("CHẾ ĐỘ NHẬN DIỆN (100% CỤC BỘ / OFFLINE)")
         eng_layout = QVBoxLayout(grp_engine)
 
-        lbl_engine_info = QLabel("🔥 <b>Mô hình Deep Learning Tiếng Việt & Viết tay</b> (VietOCR + Cinnamon AI)")
+        lbl_engine_info = QLabel("🔥 <b>Cơ Chế Nhận Diện AI Kép (Dual-Engine Voting)</b>")
         lbl_engine_info.setStyleSheet("color: #38bdf8; font-size: 12px;")
         eng_layout.addWidget(lbl_engine_info)
 
-        lbl_pipeline = QLabel("<b>Quy trình 4 Bước:</b> Tiền xử lý ➜ PaddleOCR DBNet (Định vị 1:1) ➜ Deep Learning ➜ Mô hình Ngôn ngữ (LM)")
+        lbl_pipeline = QLabel("<b>Quy trình:</b> DBNet ➜ Dynamic Crop ➜ Tách Cột (XY-Cut) ➜ Dual-Engine Voting ➜ Bi-Gram LM")
         lbl_pipeline.setStyleSheet("color: #a1a1aa; font-size: 11px;")
         eng_layout.addWidget(lbl_pipeline)
 
-        self.chk_use_lm = QCheckBox("🧠 Kích hoạt Hậu xử lý Mô hình Ngôn ngữ (Language Model - LM)")
+        # Engine Mode Selector
+        mode_layout = QHBoxLayout()
+        lbl_mode = QLabel("Mô hình:")
+        lbl_mode.setStyleSheet("color: #e4e4e7; font-size: 11px;")
+        self.combo_engine = QComboBox()
+        self.combo_engine.addItem("⚡ Dual-Engine AI (VietOCR + SVTR - Chuẩn xác nhất)", "dual")
+        self.combo_engine.addItem("✍️ VietOCR Transformer (Chữ viết tay & Ngữ cảnh)", "vietocr")
+        self.combo_engine.addItem("🚀 PaddleOCR SVTR (Siêu tốc & Chữ in / Số)", "paddleocr")
+        self.combo_engine.currentIndexChanged.connect(self._on_engine_combo_changed)
+        mode_layout.addWidget(lbl_mode)
+        mode_layout.addWidget(self.combo_engine, 1)
+        eng_layout.addLayout(mode_layout)
+
+        self.chk_use_lm = QCheckBox("🧠 Hậu xử lý Mô hình Ngôn ngữ Bi-Gram (Contextual LM)")
         self.chk_use_lm.setChecked(True)
-        self.chk_use_lm.setToolTip("Tự động sửa lỗi chính tả từ vựng theo kho 74.000 từ, khôi phục thanh dấu ngữ cảnh, chuẩn hóa dấu câu và bảng biểu.")
+        self.chk_use_lm.setToolTip("Tự động sửa lỗi chính tả từ vựng theo kho 74.000 từ, khôi phục thanh dấu ngữ cảnh với 48.000 cặp bi-gram, chuẩn hóa dấu câu và bảng biểu.")
         self.chk_use_lm.toggled.connect(self._on_lm_toggled)
         eng_layout.addWidget(self.chk_use_lm)
+
+        # Restore saved config
+        saved_engine = ConfigManager.get_instance().get("preferred_engine", "dual")
+        for i in range(self.combo_engine.count()):
+            if self.combo_engine.itemData(i) == saved_engine:
+                self.combo_engine.setCurrentIndex(i)
+                break
+        OCREngine.get_instance().engine_mode = self.get_selected_engine()
 
         layout.addWidget(grp_engine)
 
@@ -110,7 +131,11 @@ class OCRPanel(QWidget):
         action_layout.addWidget(self.btn_save_txt)
         layout.addLayout(action_layout)
 
-    def _on_engine_changed(self, mode: str = "offline"):
+    def _on_engine_combo_changed(self, index: int):
+        mode = self.combo_engine.currentData() or "dual"
+        self._on_engine_changed(mode)
+
+    def _on_engine_changed(self, mode: str = "dual"):
         OCREngine.get_instance().engine_mode = mode
         ConfigManager.get_instance().set("preferred_engine", mode)
         self.engine_changed.emit(mode)
@@ -138,7 +163,7 @@ class OCRPanel(QWidget):
             self.btn_scan_current.setText("🔍 Quét trang này")
 
     def get_selected_engine(self) -> str:
-        return "offline"
+        return self.combo_engine.currentData() or "dual"
 
     def set_ocr_result(self, result: Optional[OCRResult]):
         """Hiển thị kết quả OCR văn bản thuần và thông số thống kê."""

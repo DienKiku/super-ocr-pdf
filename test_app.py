@@ -409,6 +409,79 @@ class TestSuperOCRPDF(unittest.TestCase):
         win.tray.hide()
         win.close()
 
+    def test_12_dynamic_adaptive_padding(self):
+        """Test Dynamic Adaptive Padding in crop_text_box."""
+        from core.ocr_engine import crop_text_box
+        sample_img = np.full((300, 500, 3), 240, dtype=np.uint8)
+        poly = [[50.0, 50.0], [250.0, 50.0], [250.0, 90.0], [50.0, 90.0]]  # w=200, h=40
+
+        crop_fixed = crop_text_box(sample_img, poly, padding=2, adaptive_padding=False)
+        crop_adapt = crop_text_box(sample_img, poly, adaptive_padding=True)
+
+        self.assertIsNotNone(crop_fixed)
+        self.assertIsNotNone(crop_adapt)
+        # Adaptive padding uses 16% height (~6px vertical padding), which is greater than 2px
+        self.assertGreater(crop_adapt.shape[0], crop_fixed.shape[0], "Adaptive padding must allocate more vertical space for diacritics")
+        self.assertGreater(crop_adapt.shape[1], crop_fixed.shape[1])
+
+    def test_13_bigram_context_disambiguation(self):
+        """Test Vietnamese Bi-Gram Language Model disambiguation for homophones/unaccented words."""
+        from core.ocr_engine import VietnameseLanguageModel
+        lm = VietnameseLanguageModel.get_instance()
+
+        t1 = lm.process("kiem tra toan bo")
+        t2 = lm.process("chuc mung nam moi")
+        t3 = lm.process("thanh toan tien hang")
+
+        self.assertEqual(t1, "kiểm tra toàn bộ")
+        self.assertEqual(t2, "chúc mừng năm mới")
+        self.assertEqual(t3, "thanh toán tiền hàng")
+
+    def test_14_column_segmentation_xy_cut(self):
+        """Test Recursive XY-Cut multi-column layout preservation."""
+        from core.ocr_engine import OCREngine, OCRBox
+        ocr = OCREngine.get_instance()
+
+        boxes = [
+            OCRBox(polygon=[], bbox=(50, 100, 300, 30), text="Cột 1 Dòng 1", confidence=0.9),
+            OCRBox(polygon=[], bbox=(50, 150, 300, 30), text="Cột 1 Dòng 2", confidence=0.9),
+            OCRBox(polygon=[], bbox=(50, 200, 300, 30), text="Cột 1 Dòng 3", confidence=0.9),
+            OCRBox(polygon=[], bbox=(620, 100, 300, 30), text="Cột 2 Dòng 1", confidence=0.9),
+            OCRBox(polygon=[], bbox=(620, 150, 300, 30), text="Cột 2 Dòng 2", confidence=0.9),
+            OCRBox(polygon=[], bbox=(620, 200, 300, 30), text="Cột 2 Dòng 3", confidence=0.9),
+        ]
+
+        cols = ocr._detect_columns(boxes, img_w=1000, img_h=1200)
+        self.assertEqual(len(cols), 2, "Must identify 2 separate columns")
+
+        lines = ocr._group_into_lines(boxes, img_w=1000, img_h=1200)
+        self.assertEqual(len(lines), 6, "Must form 6 distinct reading lines")
+        # Column 1 lines must come before Column 2 lines in natural reading order
+        self.assertTrue("Cột 1" in lines[0][0].text)
+        self.assertTrue("Cột 1" in lines[2][0].text)
+        self.assertTrue("Cột 2" in lines[3][0].text)
+
+    def test_15_dual_engine_arbitration(self):
+        """Test DualEngineArbitrator voting logic."""
+        from core.ocr_engine import DualEngineArbitrator
+
+        # 1. MST / Numeric codes -> PaddleOCR priority
+        t1, c1, w1 = DualEngineArbitrator.arbitrate("0106034111-001", 0.95, "0106034111-00l", 0.75)
+        self.assertEqual(t1, "0106034111-001")
+        self.assertEqual(w1, "paddleocr")
+
+        # 2. Cross-validation agreement -> VietOCR with max confidence
+        t2, c2, w2 = DualEngineArbitrator.arbitrate(
+            "CONG TY TNHH MAI SONG NGUYEN", 0.91, "CÔNG TY TNHH MAI SONG NGUYÊN", 0.88
+        )
+        self.assertEqual(t2, "CÔNG TY TNHH MAI SONG NGUYÊN")
+        self.assertEqual(w2, "cross_verified")
+        self.assertGreaterEqual(c2, 0.98)
+
+        # 3. Vietnamese Diacritics -> VietOCR priority
+        t3, c3, w3 = DualEngineArbitrator.arbitrate("Hop dong kinh te", 0.80, "Hợp đồng kinh tế", 0.92)
+        self.assertEqual(t3, "Hợp đồng kinh tế")
+
 
 if __name__ == "__main__":
     unittest.main(warnings='ignore')
