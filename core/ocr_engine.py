@@ -403,6 +403,214 @@ def enhance_text_crop(crop: np.ndarray) -> np.ndarray:
         return crop
 
 
+# ---------------------------------------------------------------------------
+# BỘ HẬU XỬ LÝ NGỮ NGHĨA TRỌNG SỐ NGỮ CẢNH V3.6.0 (CONTEXT-WEIGHTED SEMANTIC ENGINE)
+# ---------------------------------------------------------------------------
+
+class SensitiveEntityShield:
+    """
+    Tầng 1: Lá chắn Bảo vệ Thực thể Nhạy cảm (Sensitive Entity Shield).
+    Bảo toàn 100% các chuỗi số tiền tệ, mã số thuế, số tài khoản, mã SKU,
+    số điện thoại, email, URL và ngày tháng trước khi chạy hậu xử lý ngôn ngữ.
+    """
+    PATTERNS = [
+        # URLs và Link trang web
+        r'https?://[^\s,;]+',
+        r'www\.[^\s,;]+',
+        # Email
+        r'[\w\.-]+@[\w\.-]+\.[a-zA-Z]{2,}',
+        # Tiền tệ có dấu phân cách hàng nghìn bằng dấu chấm: 1.200.000, 1.150.000, 850.000, 3.200.000
+        r'\b\d{1,3}(?:\.\d{3})+(?:\s*[đĐ]|\s*VND|\s*vnd)?\b',
+        # Mã số thuế chuẩn 10 số hoặc 13 số: 0311362549, 0106034111-001
+        r'\b\d{10}(?:-\d{3})?\b',
+        # Số tài khoản ngân hàng dài (8 đến 16 số liên tiếp)
+        r'\b\d{9,16}\b',
+        # Mã SKU / Serial / Mã linh kiện có dấu gạch ngang: MSNK4-0061, AE02-0235, DH128287349902351
+        r'\b[A-Z0-9]{2,8}-[A-Z0-9]{2,8}(?:-[A-Z0-9]+)?\b',
+        # Mã trong ngoặc đơn dạng mã linh kiện: (CET6337), (MP2014)
+        r'\b\([A-Z0-9\-]{4,12}\)\b',
+        # Mã nhân viên / mã phòng ban / số hiệu: NV02, DH128...
+        r'\b[A-Z]{2,}\d{2,}\b',
+        # Ngày tháng: 09/09/2026, 09-09-2026
+        r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b',
+    ]
+
+    def __init__(self):
+        self.saved_entities: List[str] = []
+
+    def shield(self, text: str) -> str:
+        self.saved_entities = []
+        combined_pattern = '|'.join(f'({p})' for p in self.PATTERNS)
+
+        def repl(match):
+            val = match.group(0)
+            idx = len(self.saved_entities)
+            self.saved_entities.append(val)
+            return f"__SHIELD_ENT_{idx}__"
+
+        return re.sub(combined_pattern, repl, text)
+
+    def unshield(self, text: str) -> str:
+        for idx, val in enumerate(self.saved_entities):
+            text = text.replace(f"__SHIELD_ENT_{idx}__", val)
+        return text
+
+
+class DomainContextDetector:
+    """
+    Tầng 2: Bộ Phân loại Miền Ngữ cảnh Động (Dynamic Domain Context Detector).
+    Xác định ngữ cảnh tài liệu để kích hoạt hệ số nhân trọng số (Domain Boost Multiplier).
+    """
+    DOMAINS = {
+        "INVOICE_FINANCE": {
+            "keywords": [
+                "hóa đơn", "phiếu", "tiền", "đơn giá", "thành tiền", "thuế", "mst", "stk",
+                "ngân hàng", "đồng", "thanh toán", "xuất kho", "nhập kho", "giao hàng",
+                "bằng chữ", "tổng cộng", "cộng tiền", "chiết khấu", "số lượng", "đơn vị tính",
+                "diễn giải", "tạm ứng", "phòng kế toán", "kế toán trưởng", "thủ kho", "thủ quỹ",
+                "khách hàng", "người mua", "người bán", "báo giá", "hợp đồng", "quy cách",
+                "mã hàng", "tên hàng", "ghi chú", "chuyển khoản", "tiền mặt"
+            ],
+            "weight": 2.5
+        },
+        "ADMIN_LEGAL": {
+            "keywords": [
+                "cộng hòa", "xã hội", "chủ nghĩa", "việt nam", "độc lập", "tự do", "hạnh phúc",
+                "quyết định", "nghị định", "nghị quyết", "thông tư", "chỉ thị", "ủy ban", "hội đồng",
+                "ubnd", "hđnd", "công văn", "tờ trình", "biên bản", "chủ tịch", "giám đốc", "bộ trưởng",
+                "thứ trưởng", "chánh văn phòng", "đại diện pháp luật", "pháp luật", "ban hành",
+                "căn cứ", "thi hành", "quy chế", "quy định", "tổng giám đốc", "phó giám đốc"
+            ],
+            "weight": 2.2
+        },
+        "ADDRESS_GEO": {
+            "keywords": [
+                "địa chỉ", "đường", "phố", "phường", "quận", "huyện", "thị xã", "thị trấn",
+                "tỉnh", "thành phố", "ấp", "thôn", "xóm", "tổ dân phố", "khu phố", "tòa nhà",
+                "chung cư", "ngõ", "ngách", "hẻm", "đại lộ", "khu đô thị", "khu công nghiệp",
+                "khu chế xuất", "căn hộ", "tầng", "phòng", "lô"
+            ],
+            "weight": 2.0
+        },
+        "IDENTITY_CIVIL": {
+            "keywords": [
+                "căn cước", "chứng minh", "họ và tên", "ngày sinh", "quê quán", "nơi thường trú",
+                "nơi tạm trú", "quốc tịch", "giới tính", "nơi cấp", "ngày cấp", "giá trị đến",
+                "dân tộc", "tôn giáo", "đặc điểm nhận dạng", "hộ chiếu", "giấy khai sinh"
+            ],
+            "weight": 2.2
+        },
+        "LOGISTICS": {
+            "keywords": [
+                "người gửi", "người nhận", "mã vận đơn", "thu hộ", "cod", "cước phí",
+                "trọng lượng", "khối lượng", "giao hàng", "chuyển phát", "cho xem hàng",
+                "bưu gửi", "bưu cục", "ký nhận"
+            ],
+            "weight": 2.0
+        }
+    }
+
+    WORD_DOMAIN_ASSOCIATIONS: Dict[str, Set[str]] = {
+        "đồng": {"INVOICE_FINANCE"}, "tiền": {"INVOICE_FINANCE"}, "thuế": {"INVOICE_FINANCE"},
+        "toán": {"INVOICE_FINANCE"}, "hàng": {"INVOICE_FINANCE", "LOGISTICS"},
+        "kho": {"INVOICE_FINANCE"}, "giá": {"INVOICE_FINANCE"}, "lượng": {"INVOICE_FINANCE"},
+        "triệu": {"INVOICE_FINANCE"}, "nghìn": {"INVOICE_FINANCE"}, "ngàn": {"INVOICE_FINANCE"},
+        "tỷ": {"INVOICE_FINANCE"}, "chữ": {"INVOICE_FINANCE"}, "viết": {"INVOICE_FINANCE"},
+        "hóa": {"INVOICE_FINANCE"}, "đơn": {"INVOICE_FINANCE"}, "phiếu": {"INVOICE_FINANCE"},
+        "xuất": {"INVOICE_FINANCE"}, "nhập": {"INVOICE_FINANCE"}, "cộng": {"INVOICE_FINANCE"},
+        "tổng": {"INVOICE_FINANCE"}, "suất": {"INVOICE_FINANCE"}, "chiết": {"INVOICE_FINANCE"},
+        "khấu": {"INVOICE_FINANCE"}, "thủ": {"INVOICE_FINANCE"}, "quỹ": {"INVOICE_FINANCE"},
+        "bằng": {"INVOICE_FINANCE"}, "tính": {"INVOICE_FINANCE"}, "vị": {"INVOICE_FINANCE"},
+        "kế": {"INVOICE_FINANCE"}, "khoản": {"INVOICE_FINANCE"}, "tài": {"INVOICE_FINANCE"},
+        "chuyển": {"INVOICE_FINANCE"}, "mặt": {"INVOICE_FINANCE"}, "báo": {"INVOICE_FINANCE"},
+        "luật": {"ADMIN_LEGAL"}, "pháp": {"ADMIN_LEGAL"}, "nghị": {"ADMIN_LEGAL"},
+        "quyết": {"ADMIN_LEGAL"}, "định": {"ADMIN_LEGAL"}, "thông": {"ADMIN_LEGAL"},
+        "tư": {"ADMIN_LEGAL"}, "tịch": {"ADMIN_LEGAL"}, "chủ": {"ADMIN_LEGAL"},
+        "bộ": {"ADMIN_LEGAL"}, "ban": {"ADMIN_LEGAL"}, "nhân": {"ADMIN_LEGAL"},
+        "dân": {"ADMIN_LEGAL"}, "ủy": {"ADMIN_LEGAL"}, "hội": {"ADMIN_LEGAL"},
+        "chính": {"ADMIN_LEGAL"}, "quyền": {"ADMIN_LEGAL"}, "trình": {"ADMIN_LEGAL"},
+        "hòa": {"ADMIN_LEGAL"}, "nghĩa": {"ADMIN_LEGAL"}, "phúc": {"ADMIN_LEGAL"},
+        "đường": {"ADDRESS_GEO"}, "phố": {"ADDRESS_GEO"}, "phường": {"ADDRESS_GEO"},
+        "quận": {"ADDRESS_GEO"}, "huyện": {"ADDRESS_GEO"}, "thành": {"ADDRESS_GEO"},
+        "tỉnh": {"ADDRESS_GEO"}, "thôn": {"ADDRESS_GEO"}, "xóm": {"ADDRESS_GEO"},
+        "ấp": {"ADDRESS_GEO"}, "ngõ": {"ADDRESS_GEO"}, "ngách": {"ADDRESS_GEO"},
+        "hẻm": {"ADDRESS_GEO"}, "chung": {"ADDRESS_GEO"}, "cư": {"ADDRESS_GEO"},
+        "thị": {"ADDRESS_GEO"}, "xã": {"ADDRESS_GEO"}, "trấn": {"ADDRESS_GEO"},
+        "lộ": {"ADDRESS_GEO"}, "khu": {"ADDRESS_GEO"}, "đô": {"ADDRESS_GEO"},
+        "cước": {"IDENTITY_CIVIL"}, "căn": {"IDENTITY_CIVIL"}, "sinh": {"IDENTITY_CIVIL"},
+        "quán": {"IDENTITY_CIVIL"}, "tịch": {"IDENTITY_CIVIL"}, "tính": {"IDENTITY_CIVIL"},
+        "trú": {"IDENTITY_CIVIL"}, "chứng": {"IDENTITY_CIVIL"}, "minh": {"IDENTITY_CIVIL"},
+        "gửi": {"LOGISTICS"}, "nhận": {"LOGISTICS"}, "vận": {"LOGISTICS"},
+        "kiện": {"LOGISTICS"}, "bưu": {"LOGISTICS"}
+    }
+
+    @classmethod
+    def detect_domains(cls, text: str) -> Dict[str, float]:
+        text_lower = text.lower()
+        scores = {}
+        for domain, info in cls.DOMAINS.items():
+            cnt = sum(1 for kw in info["keywords"] if kw in text_lower)
+            scores[domain] = cnt * info["weight"]
+        return scores
+
+    @classmethod
+    def get_domain_boost(cls, domain_scores: Dict[str, float], candidate_word: str) -> float:
+        cand_lower = candidate_word.lower()
+        domains = cls.WORD_DOMAIN_ASSOCIATIONS.get(cand_lower, set())
+        if not domains:
+            return 1.0
+        max_boost = 1.0
+        for d in domains:
+            s = domain_scores.get(d, 0.0)
+            if s > 0:
+                boost = 1.0 + min(s * 0.4, 2.5)
+                if boost > max_boost:
+                    max_boost = boost
+        return max_boost
+
+
+class ContextWeightedSemanticEngine:
+    """
+    Tầng 3 & 4: Bộ Động Cơ Ngữ Nghĩa Có Gắn Trọng Số Ngữ Cảnh (Context-Weighted Semantic Engine).
+    - Ma trận nhầm lẫn thị giác (Visual Homoglyphs).
+    - Sinh ứng viên qua biến đổi hình ảnh và hoán vị thanh dấu.
+    - Chấm điểm đa ngữ cảnh Bi-gram + Tri-gram có trọng số miền.
+    - Cổng kiểm duyệt an toàn (Safety Gating) chống sửa nhầm từ đúng.
+    """
+    VISUAL_HOMOGLYPH_SUBSTITUTIONS = [
+        ("cl", "d"),
+        ("rn", "m"),
+        ("vv", "w"),
+        ("ri", "n"),
+        ("0", "o"),
+        ("1", "l"),
+        ("1", "i"),
+        ("1", "t"),
+        ("5", "s"),
+        ("8", "b"),
+    ]
+
+    @classmethod
+    def generate_candidate_stems(cls, token_lower: str) -> Set[str]:
+        stems = {token_lower}
+        unacc = remove_accents(token_lower)
+        stems.add(unacc)
+
+        if 'd' in unacc:
+            stems.add(unacc.replace('d', 'đ'))
+        if 'đ' in unacc:
+            stems.add(unacc.replace('đ', 'd'))
+
+        for src, dst in cls.VISUAL_HOMOGLYPH_SUBSTITUTIONS:
+            if src in unacc:
+                replaced = unacc.replace(src, dst)
+                stems.add(replaced)
+                if 'd' in replaced:
+                    stems.add(replaced.replace('d', 'đ'))
+
+        return stems
+
+
 class VietnameseDiacriticsCorrector:
     """
     Bộ hậu xử lý phục hồi thanh dấu & chính tả tiếng Việt:
@@ -411,6 +619,104 @@ class VietnameseDiacriticsCorrector:
     - Chuẩn hóa Unicode NFC 100%.
     """
     WORD_REPLACEMENTS = [
+        # --- MIỀN 1: HÓA ĐƠN, KẾ TOÁN & THUẾ ---
+        (r'\b[DdĐđ][oơ][n]\s*gi[aá]\b', 'Đơn giá'),
+        (r'\b[Tt]h[aà]nh\s*ti[eê]n\b', 'Thành tiền'),
+        (r'\b[Hh][oó][aá]\s+[đd][oơ][n]\s+GTGT:?', 'Hóa đơn GTGT:'),
+        (r'\b[Hh][oó][aá]\s+[đd][oơ][n]\s+[đd]i[eệ]n\s+t[uử]\b', 'Hóa đơn điện tử'),
+        (r'\b[Hh][oó][aá]\s+[đd][oơ][n]\s+gi[aá]\s+tr[iị]\s+gia\s+t[aă]ng:?', 'Hóa đơn giá trị gia tăng:'),
+        (r'\b[Pp]hi[eêế][uú]\s+giao\s+h[aà]ng:?', 'Phiếu giao hàng:'),
+        (r'\b[Pp]hi[eêế][uú]\s+xu[aáâấ][t1]\s+kh[oô0]:?', 'Phiếu xuất kho:'),
+        (r'\b[Pp]hi[eêế][uú]\s+nh[aâậ]p\s+kh[oô0]:?', 'Phiếu nhập kho:'),
+        (r'\b[Pp]hi[eêế][uú]\s+thu:?', 'Phiếu thu:'),
+        (r'\b[Pp]hi[eêế][uú]\s+chi:?', 'Phiếu chi:'),
+        (r'\b[Đđ][oơ][n]\s+[đd][aặ]t\s+h[aà]ng:?', 'Đơn đặt hàng:'),
+        (r'\b[Bb][aá]o\s+gi[aá]:?', 'Báo giá:'),
+        (r'\b[Hh][oợ]p\s+[đd][oồ][nñ]g\s+kinh\s+t[eế]:?', 'Hợp đồng kinh tế:'),
+        (r'\b[Mm][aã]\s+s[oố]\s+thu[eế]:?', 'Mã số thuế:'),
+        (r'\b[Ss][oố]\s+t[aà]i\s+kho[aả]n:?', 'Số tài khoản:'),
+        (r'\b[Nn]g[aâ]n\s+h[aà]ng:?', 'Ngân hàng:'),
+        (r'\b[Cc]hi\s+nh[aá]nh:?', 'Chi nhánh:'),
+        (r'\b[Tt]hu[eêế]\s+su[aâấ]t:?', 'Thuế suất:'),
+        (r'\b[Ss][oố]\s+l[uư][oợ]ng\b', 'Số lượng'),
+        (r'\b[Đđ][oơ][n]\s+v[iị]\s+t[ií]nh\b', 'Đơn vị tính'),
+        (r'\b[Tt][eê]n\s+h[aà]ng\s+h[oó][aá]\b', 'Tên hàng hóa'),
+        (r'\b[Qq]uy\s+c[aá]ch\b', 'Quy cách'),
+        (r'\b[Nn]g[uư][oờ]i\s+mua\s+h[aà]ng:?', 'Người mua hàng:'),
+        (r'\b[Nn]g[uư][oờ]i\s+b[aá]n\s+h[aà]ng:?', 'Người bán hàng:'),
+        (r'\b[Nn]g[uư][oờ]i\s+l[aậ]p\s+phi[eêế]u:?', 'Người lập phiếu:'),
+        (r'\b[Nn]g[uư][oờ]i\s+giao\s+h[aà]ng:?', 'Người giao hàng:'),
+        (r'\b[Nn]g[uư][oờ]i\s+nh[aậ]n\s+h[aà]ng:?', 'Người nhận hàng:'),
+        (r'\b[Tt]h[uủ]\s+[Qq]u[yỹ]\b', 'Thủ quỹ'),
+        (r'\b[Kk][eế]\s+to[aá]n\s+tr[uư][oở]ng\b', 'Kế toán trưởng'),
+        (r'\b[Gg]i[aá]m\s+[đd][oố]c\b', 'Giám đốc'),
+        (r'\b[Tt][oổ]ng\s+gi[aá]m\s+[đd][oố]c\b', 'Tổng giám đốc'),
+        (r'\b[Pp]h[oó]\s+gi[aá]m\s+[đd][oố]c\b', 'Phó giám đốc'),
+        (r'\b[Cc]h[uữ]\s+k[yý]\b', 'Chữ ký'),
+        (r'\b[Kk][yý]\s+v[aà]\s+ghi\s+r[oõ]\s+h[oọ]\s+t[eê]n\b', 'Ký và ghi rõ họ tên'),
+
+        # --- MIỀN 2: HÀNH CHÍNH & PHÁP LÝ ---
+        (r'\b[Cc][OỘ][Nn][Gg]\s+[Hh][OÒ][AÀ]\s+[Xx][AÃ][Hh][OỘ][Ii]\s+[Cc][Hh][UỦ]\s+[Nn][Gg][Hh][IĨ][Aa]\s+[Vv][II][EỆ][Tt]\s+[Nn][Aa][Mm]\b', 'CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM'),
+        (r'\b[Đđ][OỘ][Cc]\s+[Ll][AẬ][Pp]\s*-\s*[Tt][UỰ]\s+[Dd][O O]\s*-\s*[Hh][AẠ][Nn][Hh]\s+[Pp][Hh][UÚ][Cc]\b', 'ĐỘC LẬP - TỰ DO - HẠNH PHÚC'),
+        (r'\b[Ủu][Yy]\s+ban\s+nh[aâ]n\s+d[aâ]n\b', 'Ủy ban nhân dân'),
+        (r'\b[Hh][oộ]i\s+[đd][oồ]ng\s+nh[aâ]n\s+d[aâ]n\b', 'Hội đồng nhân dân'),
+        (r'\b[Qq]uy[eêế][t1]\s+[đd][iị]nh:?', 'Quyết định:'),
+        (r'\b[Nn]gh[iị]\s+quy[eêế][t1]:?', 'Nghị quyết:'),
+        (r'\b[Nn]gh[iị]\s+[đd][iị]nh:?', 'Nghị định:'),
+        (r'\b[Tt]h[oô]ng\s+t[uư]:?', 'Thông tư:'),
+        (r'\b[Cc][oô]ng\s+v[aă]n:?', 'Công văn:'),
+        (r'\b[Tt][oờ]\s+tr[iì]nh:?', 'Tờ trình:'),
+        (r'\b[Tt]h[oô]ng\s+b[aá]o:?', 'Thông báo:'),
+        (r'\b[Bb][aá]o\s+c[aá]o:?', 'Báo cáo:'),
+        (r'\b[Cc]h[uủ]\s+t[iị]ch\b', 'Chủ tịch'),
+        (r'\b[Pp]h[oó]\s+ch[uủ]\s+t[iị]ch\b', 'Phó Chủ tịch'),
+        (r'\b[Bbi][oộ]\s+tr[uư][oở]ng\b', 'Bộ trưởng'),
+        (r'\b[Tt]h[uứ]\s+tr[uư][oở]ng\b', 'Thứ trưởng'),
+        (r'\b[Cc]h[aánh]\s+v[aă]n\s+ph[oò]ng\b', 'Chánh văn phòng'),
+        (r'\b[Tt]r[uư][oở]ng\s+ph[oò]ng\b', 'Trưởng phòng'),
+        (r'\b[Pp]h[oó]\s+tr[uư][oở]ng\s+ph[oò]ng\b', 'Phó trưởng phòng'),
+        (r'\b[Cc][oô]ng\s+ty\s+[Cc][oổ][\s\-]*[Pp]h[aàâầ]n\b', 'Công ty Cổ phần'),
+        (r'\b[Dd]oanh\s+nghi[eệ]p\s+t[uư]\s+nh[aâ]n\b', 'Doanh nghiệp tư nhân'),
+        (r'\b[Đđ][aạ]i\s+di[eệ]n\s+(theo\s+)?ph[aá]p\s+lu[aậ]t:?', 'Đại diện pháp luật:'),
+
+        # --- MIỀN 3: ĐỊA DANH & ĐỊA CHỈ ---
+        (r'\b[Đđ][iị]a\s+ch[ií]:?', 'Địa chỉ:'),
+        (r'\b[Đđ][uư][oờ]ng\b', 'Đường'),
+        (r'\b[Pp]h[uư][oờ]ng\b', 'Phường'),
+        (r'\b[Qq]u[aậ]n\b', 'Quận'),
+        (r'\b[Hh]uy[eệ]n\b', 'Huyện'),
+        (r'\b[Tt]h[iị]\s+tr[aâấ]n\b', 'Thị trấn'),
+        (r'\b[Tt]h[iị]\s+x[aã]\b', 'Thị xã'),
+        (r'\b[Tt]h[aà]nh\s+[Pp]h[oóôố]\b', 'Thành phố'),
+        (r'\b[Kk]hu\s+[đd][oô]\s+th[iị]\b', 'Khu đô thị'),
+        (r'\b[Kk]hu\s+c[oô]ng\s+nghi[eệ]p\b', 'Khu công nghiệp'),
+        (r'\b[Tt][oò]a\s+nh[aà]\b', 'Tòa nhà'),
+        (r'\b[Cc]hung\s+c[uư]\b', 'Chung cư'),
+
+        # --- MIỀN 4: NHÂN THÂN & CCCD ---
+        (r'\b[Cc][aă]n\s+c[uư][oơớ]c\s+c[oô]ng\s+d[aâ]n:?', 'Căn cước công dân:'),
+        (r'\b[Cc]h[uứ]ng\s+minh\s+nh[aâ]n\s+d[aâ]n:?', 'Chứng minh nhân dân:'),
+        (r'\b[Hh][oộ]\s+chi[eêế]u:?', 'Hộ chiếu:'),
+        (r'\b[Hh][oọ]\s+v[aà]\s+t[eê]n:?', 'Họ và tên:'),
+        (r'\b[Nn]g[aà]y\s+sinh:?', 'Ngày sinh:'),
+        (r'\b[Gg]i[oớ]i\s+t[ií]nh:?', 'Giới tính:'),
+        (r'\b[Qq]u[oố]c\s+t[iị]ch:?', 'Quốc tịch:'),
+        (r'\b[Qq]u[eê]\s+qu[aá]n:?', 'Quê quán:'),
+        (r'\b[Nn][oơ]i\s+th[uư][oờ]ng\s+tr[uú]:?', 'Nơi thường trú:'),
+        (r'\b[Nn][oơ]i\s+t[aạ]m\s+tr[uú]:?', 'Nơi tạm trú:'),
+
+        # --- MIỀN 5: LOGISTICS & GIAO VẬN ---
+        (r'\b[Nn]g[uư][oờ]i\s+g[uử]i:?', 'Người gửi:'),
+        (r'\b[Nn]g[uư][oờ]i\s+nh[aậ]n:?', 'Người nhận:'),
+        (r'\b[Ss][oố]\s+[đd]i[eệ]n\s+tho[aạ]i:?', 'Số điện thoại:'),
+        (r'\b[Mm][aã]\s+v[aậ]n\s+[đd][oơ]n:?', 'Mã vận đơn:'),
+        (r'\b[Tt]i[eề]n\s+thu\s+h[oộ]\s+COD:?', 'Tiền thu hộ COD:'),
+        (r'\b[Cc][uư][oớ]c\s+ph[ií]:?', 'Cước phí:'),
+        (r'\b[Pp]h[ií]\s+v[aậ]n\s+chuy[eể]n:?', 'Phí vận chuyển:'),
+        (r'\b[Tt]r[oọ]ng\s+l[uư][oợ]ng:?', 'Trọng lượng:'),
+        (r'\b[Kk]h[oố]i\s+l[uư][oợ]ng:?', 'Khối lượng:'),
+
+        # --- CÁC QUY TẮC CŨ ĐƯỢC BẢO LƯU TOÀN VẸN ---
         (r'\b[Ss]o\s+(\d+)', r'Số \1'),
         (r'\b[Ss][oó]\s+([0-9])', r'Số \1'),
         (r'\b[Cc]hường\b', 'đường'),
@@ -579,16 +885,17 @@ class VietnameseDiacriticsCorrector:
 
 class VietnameseBiGramModel:
     """
-    Mô hình xác suất cặp từ Bi-Gram tiếng Việt (Contextual Bi-Gram Language Model):
-    - Chứa hơn 48.000 cặp bi-gram tiếng Việt chuẩn hóa (hành chính, hóa đơn, pháp lý, đời sống).
-    - Dùng để giải quyết các từ đa nghĩa bị mất dấu trong unaccented_map
-      (ví dụ: 'kiem tra toan bo' -> chọn 'toàn' thay vì 'toán'; 'chuc mung' -> chọn 'chúc' thay vì 'chức').
+    Mô hình xác suất n-gram tiếng Việt (Contextual Bi-Gram & Tri-Gram Language Model):
+    - Chứa hơn 48.000 cặp bi-gram tiếng Việt chuẩn hóa và bộ tri-gram đa miền.
+    - Hỗ trợ đánh giá chuỗi từ liền kề theo cửa sổ 5 từ (prev2, prev, candidate, next, next2).
+    - Tối ưu hóa phân định từ đa nghĩa và khôi phục thanh dấu / sửa lỗi hình ảnh thị giác.
     """
     _instance: Optional["VietnameseBiGramModel"] = None
 
     def __init__(self):
         self.bigrams: Dict[str, int] = {}
-        self._load_bigrams()
+        self.trigrams: Dict[str, int] = {}
+        self._load_ngrams()
 
     @classmethod
     def get_instance(cls) -> "VietnameseBiGramModel":
@@ -596,7 +903,7 @@ class VietnameseBiGramModel:
             cls._instance = VietnameseBiGramModel()
         return cls._instance
 
-    def _load_bigrams(self):
+    def _load_ngrams(self):
         base_dir = get_base_dir()
         bigram_path = os.path.join(base_dir, "core", "models", "viet_bigrams.json")
         if os.path.exists(bigram_path):
@@ -607,20 +914,60 @@ class VietnameseBiGramModel:
             except Exception as e:
                 print(f"[BiGram] Warning loading bigrams: {e}")
 
-        # Bổ sung các cặp bi-gram tài chính, hóa đơn, chứng từ trọng điểm
-        invoice_bigrams = {
-            "triệu_đồng": 120, "nghìn_đồng": 120, "tỷ_đồng": 120, "trăm_đồng": 120,
-            "tiền_hàng": 120, "tiền_thuế": 120, "thanh_toán": 120, "toán_sau": 120,
-            "ba_triệu": 120, "hai_triệu": 120, "một_triệu": 120, "bốn_triệu": 120,
-            "năm_triệu": 120, "sáu_triệu": 120, "bảy_triệu": 120, "tám_triệu": 120,
-            "chín_triệu": 120, "mười_triệu": 120, "viết_bằng": 120, "bằng_chữ": 120,
-            "kiêm_phiếu": 120, "phiếu_xuất": 120, "xuất_kho": 120, "giao_hàng": 120,
-            "khách_hàng": 120, "hàng_ký": 120, "ký_nhận": 120, "nhân_viên": 120,
-            "kỹ_thuật": 120, "thủ_kho": 120, "phòng_kế": 120, "kế_toán": 120,
-            "địa_điểm": 120, "điểm_giao": 120, "đầu_dò": 120, "dò_nhiệt": 120,
-            "trục_rulô": 120, "máy_in": 120, "cho_thuê": 120, "giấy_in": 120
+        # Bổ sung các cặp bi-gram tài chính, hóa đơn, pháp lý, hành chính trọng điểm
+        domain_bigrams = {
+            # Hóa đơn & Tài chính
+            "triệu_đồng": 150, "nghìn_đồng": 150, "tỷ_đồng": 150, "trăm_đồng": 130,
+            "tiền_hàng": 150, "tiền_thuế": 140, "thanh_toán": 150, "toán_sau": 140, "toán_tiền": 140,
+            "ba_triệu": 140, "hai_triệu": 140, "một_triệu": 140, "bốn_triệu": 140,
+            "năm_triệu": 140, "sáu_triệu": 140, "bảy_triệu": 140, "tám_triệu": 140,
+            "chín_triệu": 140, "mười_triệu": 140, "viết_bằng": 150, "bằng_chữ": 150,
+            "kiêm_phiếu": 150, "phiếu_xuất": 150, "xuất_kho": 150, "giao_hàng": 150,
+            "nhận_hàng": 140, "khách_hàng": 150, "hàng_ký": 130, "ký_nhận": 140,
+            "nhân_viên": 140, "kỹ_thuật": 130, "thủ_kho": 140, "phòng_kế": 140,
+            "kế_toán": 150, "địa_điểm": 130, "điểm_giao": 130, "đầu_dò": 140,
+            "dò_nhiệt": 140, "trục_rulô": 140, "máy_in": 140, "cho_thuê": 130,
+            "giấy_in": 130, "mã_hàng": 140, "tên_hàng": 150, "đơn_giá": 150,
+            "thành_tiền": 150, "số_lượng": 140, "đơn_vị": 140, "vị_tính": 140,
+            "thuế_suất": 140, "chiết_khấu": 130, "tổng_tiền": 150, "tổng_cộng": 140,
+            "mã_số": 150, "số_thuế": 150, "số_tài": 140, "tài_khoản": 150,
+            "ngân_hàng": 150, "chi_nhánh": 140, "tiền_mặt": 130, "chuyển_khoản": 130,
+            "thủ_quỹ": 140, "kế_toán_trưởng": 140, "giám_đốc": 140, "tổng_giám": 130,
+            "kiểm_tra": 140, "tra_toàn": 140, "toàn_bộ": 150,
+            "chúc_mừng": 150, "mừng_năm": 150, "năm_mới": 150,
+            # Hành chính & Pháp lý
+            "cộng_hòa": 150, "hòa_xã": 150, "xã_hội": 150, "hội_chủ": 150,
+            "chủ_nghĩa": 150, "nghĩa_việt": 150, "việt_nam": 150, "độc_lập": 150,
+            "tự_do": 150, "hạnh_phúc": 150, "ủy_ban": 150, "ban_nhân": 150,
+            "nhân_dân": 150, "hội_đồng": 150, "đồng_nhân": 150, "quyết_định": 150,
+            "nghị_định": 150, "nghị_quyết": 150, "thông_tư": 150, "công_văn": 140,
+            "chủ_tịch": 150, "bộ_trưởng": 140, "thứ_trưởng": 140, "công_ty": 150,
+            "cổ_phần": 150, "trách_nhiệm": 150, "hữu_hạn": 150, "đại_diện": 140,
+            "pháp_luật": 140,
+            # Địa chỉ & CCCD
+            "địa_chỉ": 150, "thành_phố": 150, "khu_đô": 140, "đô_thị": 140,
+            "khu_công": 140, "công_nghiệp": 140, "căn_cước": 150, "cước_công": 150,
+            "công_dân": 150, "chứng_minh": 150, "ngày_sinh": 150, "quê_quán": 150,
+            "thường_trú": 150, "tạm_trú": 150, "họ_và": 150, "và_tên": 150
         }
-        self.bigrams.update(invoice_bigrams)
+        self.bigrams.update(domain_bigrams)
+
+        # Bộ Tri-Gram chuẩn hóa đa miền
+        domain_trigrams = {
+            "cộng_hòa_xã": 200, "hòa_xã_hội": 200, "xã_hội_chủ": 200, "hội_chủ_nghĩa": 200,
+            "chủ_nghĩa_việt": 200, "nghĩa_việt_nam": 200, "độc_lập_tự": 200, "lập_tự_do": 200,
+            "tự_do_hạnh": 200, "do_hạnh_phúc": 200, "ủy_ban_nhân": 200, "ban_nhân_dân": 200,
+            "hội_đồng_nhân": 200, "đồng_nhân_dân": 200, "hóa_đơn_giá": 200, "đơn_giá_trị": 200,
+            "giá_trị_gia": 200, "trị_gia_tăng": 200, "phiếu_xuất_kho": 200, "phiếu_nhập_kho": 180,
+            "phiếu_giao_hàng": 200, "kiêm_phiếu_xuất": 200, "người_lập_phiếu": 180,
+            "căn_cước_công": 200, "cước_công_dân": 200, "chứng_minh_nhân": 200, "minh_nhân_dân": 200,
+            "công_ty_cổ": 200, "ty_cổ_phần": 200, "trách_nhiệm_hữu": 200, "nhiệm_hữu_hạn": 200,
+            "viết_bằng_chữ": 200, "tổng_tiền_thanh": 200, "tiền_thanh_toán": 200, "thanh_toán_sau": 180,
+            "số_tài_khoản": 180, "mã_số_thuế": 200, "thành_phố_hồ": 200, "phố_hồ_chí": 200,
+            "hồ_chí_minh": 200, "khu_đô_thị": 180, "khu_công_nghiệp": 180, "đầu_dò_nhiệt": 180,
+            "đại_diện_pháp": 180, "diện_pháp_luật": 180, "đơn_vị_tính": 180
+        }
+        self.trigrams.update(domain_trigrams)
 
     def score_bigram(self, w1: Optional[str], w2: Optional[str]) -> float:
         """Tính điểm tần suất cặp từ w1 -> w2."""
@@ -629,23 +976,50 @@ class VietnameseBiGramModel:
         key = f"{w1.lower()}_{w2.lower()}"
         return float(self.bigrams.get(key, 0.0))
 
-    def score_context(self, prev_w: Optional[str], candidate: str, next_w: Optional[str]) -> float:
-        """Tính điểm tổng hợp ngữ cảnh trái và phải cho từ candidate."""
+    def score_trigram(self, w1: Optional[str], w2: Optional[str], w3: Optional[str]) -> float:
+        """Tính điểm tần suất bộ ba từ w1 -> w2 -> w3."""
+        if not w1 or not w2 or not w3:
+            return 0.0
+        key = f"{w1.lower()}_{w2.lower()}_{w3.lower()}"
+        return float(self.trigrams.get(key, 0.0))
+
+    def score_context(
+        self,
+        prev2_w: Optional[str] = None,
+        prev_w: Optional[str] = None,
+        candidate: str = "",
+        next_w: Optional[str] = None,
+        next2_w: Optional[str] = None
+    ) -> float:
+        """Tính điểm tổng hợp ngữ cảnh trái và phải (cửa sổ 5 từ kết hợp Bi-gram & Tri-gram)."""
         score = 0.0
+        # Điểm Bi-Gram liền kề
         if prev_w:
             score += self.score_bigram(prev_w, candidate) * 1.5
         if next_w:
-            score += self.score_bigram(candidate, next_w)
+            score += self.score_bigram(candidate, next_w) * 1.2
+
+        # Điểm Tri-Gram
+        if prev2_w and prev_w:
+            score += self.score_trigram(prev2_w, prev_w, candidate) * 2.5
+        if prev_w and next_w:
+            score += self.score_trigram(prev_w, candidate, next_w) * 3.0
+        if next_w and next2_w:
+            score += self.score_trigram(candidate, next_w, next2_w) * 2.0
+
         return score
 
 
 class VietnameseLanguageModel:
     """
-    Bộ Hậu Xử Lý Mô Hình Ngôn Ngữ Tiếng Việt (Language Model - LM Post-Processing):
-    1. Lexicon & Spell Checking: Tra cứu kho 74.000 từ vựng chuẩn hóa tiếng Việt (core/models/viet_words.txt).
-    2. Contextual Diacritics Restoration: Khôi phục thanh dấu cho các từ bị mất dấu dựa trên Bi-Gram LM (48.000 cặp từ).
-    3. Punctuation & Typography Normalization: Chuẩn hóa dấu câu (:, ,, ., -, /), viết hoa đầu dòng, khử ký tự nhiễu.
-    4. Domain Knowledge: Bổ sung từ điển ngữ nghĩa hóa đơn, hành chính, địa danh 63 tỉnh thành Việt Nam.
+    Bộ Hậu Xử Lý Mô Hình Ngôn Ngữ Tiếng Việt Toàn Diện (Context-Weighted Semantic Language Model v3.6.0):
+    1. Sensitive Entity Shield: Bảo vệ tuyệt đối 100% mã số thuế, số tiền, tài khoản, SKU, SĐT, URLs.
+    2. Dynamic Domain Context Detector: Tự động phát hiện miền tài liệu và áp trọng số miền.
+    3. Visual Homoglyphs & Semantic Engine: Tái sinh ứng viên sửa lỗi nhầm lẫn hình học (cl<->d, rn<->m, 0<->o...).
+    4. 5-Gram Context Scoring: Chấm điểm liên kết ngữ cảnh Bi-gram + Tri-gram.
+    5. High-Delta Safety Gating: Cổng an toàn kiểm soát chặt chẽ việc thay thế từ hợp lệ.
+    6. Domain Phrase Grammar: Hơn 240 quy tắc ngữ cảnh chuyên sâu bảo vệ tính nhất quán hóa đơn/chứng từ.
+    7. Punctuation & Typography Normalization: Chuẩn hóa dấu câu, khoảng trắng, khôi phục địa danh 63 tỉnh thành.
     """
     _instance: Optional["VietnameseLanguageModel"] = None
 
@@ -687,76 +1061,110 @@ class VietnameseLanguageModel:
     def correct_token_with_context(
         self,
         token: str,
-        prev_word: Optional[str] = None,
-        next_word: Optional[str] = None
+        prev2_w: Optional[str] = None,
+        prev_w: Optional[str] = None,
+        next_w: Optional[str] = None,
+        next2_w: Optional[str] = None,
+        domain_scores: Optional[Dict[str, float]] = None
     ) -> str:
-        """Sửa lỗi chính tả cấp từ kết hợp ngữ cảnh Bi-gram."""
+        """Sửa lỗi chính tả cấp từ kết hợp ngữ cảnh Bi-gram/Tri-gram và Ma trận Nhầm lẫn Thị giác."""
         if not token or len(token) < 2:
             return token
 
-        # Không can thiệp nếu từ chứa chữ số, URL, email, hoặc ký tự đặc biệt
-        if any(c.isdigit() or c in "@/:.-_#$%&*" for c in token):
+        # Không can thiệp nếu là placeholder bảo vệ thực thể nhạy cảm
+        if token.startswith("__SHIELD_ENT_") and token.endswith("__"):
+            return token
+
+        # Không can thiệp nếu là chuỗi thuần số hoặc ký tự phân cách nhạy cảm
+        if token.isdigit() or any(c in "@/:#$%" for c in token):
             return token
 
         is_upper = token.isupper()
         is_title = token.istitle()
         lower_token = token.lower()
-        unacc = remove_accents(lower_token)
 
-        candidates = self.unaccented_map.get(unacc, [])
-        if not candidates:
+        # Sinh ứng viên thông qua ContextWeightedSemanticEngine (giải quyết cl->d, rn->m, 0->o, 1->l/i/t...)
+        candidate_stems = ContextWeightedSemanticEngine.generate_candidate_stems(lower_token)
+        all_candidates: Set[str] = set()
+
+        for stem in candidate_stems:
+            if stem in self.words_set:
+                all_candidates.add(stem)
+            for cand in self.unaccented_map.get(stem, []):
+                all_candidates.add(cand)
+
+        if not all_candidates:
             return token
 
-        # Nếu có Bi-gram model, tìm ứng viên có điểm ngữ cảnh tối ưu
-        if self.bigram_model and (prev_word or next_word):
-            prev_cands = [prev_word.lower()] if prev_word else [None]
-            if prev_word:
-                prev_unacc = remove_accents(prev_word.lower())
-                prev_cands.extend(self.unaccented_map.get(prev_unacc, []))
+        # Nếu có n-gram model và ngữ cảnh xung quanh
+        if self.bigram_model and (prev_w or next_w):
+            prev_cands = [prev_w.lower()] if prev_w else [None]
+            if prev_w:
+                prev_unacc = remove_accents(prev_w.lower())
+                for cand in self.unaccented_map.get(prev_unacc, []):
+                    if cand not in prev_cands:
+                        prev_cands.append(cand)
 
-            next_cands = [next_word.lower()] if next_word else [None]
-            if next_word:
-                next_unacc = remove_accents(next_word.lower())
-                next_cands.extend(self.unaccented_map.get(next_unacc, []))
+            next_cands = [next_w.lower()] if next_w else [None]
+            if next_w:
+                next_unacc = remove_accents(next_w.lower())
+                for cand in self.unaccented_map.get(next_unacc, []):
+                    if cand not in next_cands:
+                        next_cands.append(cand)
+
+            p2 = prev2_w.lower() if prev2_w else None
+            n2 = next2_w.lower() if next2_w else None
 
             best_cand = None
             best_score = 0.0
 
+            # Điểm baseline của token gốc
             curr_score = 0.0
             for pw in prev_cands:
                 for nw in next_cands:
-                    s = self.bigram_model.score_context(pw, lower_token, nw)
+                    s = self.bigram_model.score_context(p2, pw, lower_token, nw, n2)
                     if s > curr_score:
                         curr_score = s
 
-            for cand in candidates:
+            # Chấm điểm từng ứng viên có nhân trọng số miền (Domain Boost)
+            for cand in all_candidates:
+                domain_boost = DomainContextDetector.get_domain_boost(domain_scores or {}, cand)
                 for pw in prev_cands:
                     for nw in next_cands:
-                        s = self.bigram_model.score_context(pw, cand, nw)
+                        raw_s = self.bigram_model.score_context(p2, pw, cand, nw, n2)
+                        s = raw_s * domain_boost
                         if s > best_score:
                             best_score = s
                             best_cand = cand
 
+            # Cổng kiểm duyệt an toàn (High-Delta Safety Gating)
             should_replace = False
             if best_cand and best_score > 0:
-                if lower_token not in self.words_set or lower_token == unacc:
+                is_curr_valid_word = (lower_token in self.words_set) and (
+                    lower_token != remove_accents(lower_token) or lower_token in ("va", "la", "co", "ra", "cho", "di")
+                )
+                if not is_curr_valid_word:
+                    # Token gốc bị thiếu dấu hoặc có lỗi hình ảnh -> thay thế nếu best_score tốt hơn
                     should_replace = (best_score > curr_score)
                 else:
-                    should_replace = (best_score >= 50 and best_score > curr_score + 30)
+                    # Token gốc vốn là một từ đúng -> chỉ thay đổi khi điểm ngữ cảnh vượt ngưỡng an toàn cao
+                    should_replace = (best_score >= 50 and best_score >= curr_score + 35)
 
-            if should_replace:
+            if should_replace and best_cand:
                 if is_upper:
                     return best_cand.upper()
                 elif is_title:
                     return best_cand.capitalize()
                 return best_cand
 
-        # Nếu từ đã đúng trong từ điển tiếng Việt chuẩn -> giữ nguyên
+        # Nếu không có ngữ cảnh xung quanh
         if lower_token in self.words_set:
             return token
 
-        if len(candidates) == 1:
-            cand = candidates[0]
+        unacc = remove_accents(lower_token)
+        simple_cands = self.unaccented_map.get(unacc, [])
+        if len(simple_cands) == 1:
+            cand = simple_cands[0]
             if is_upper:
                 return cand.upper()
             elif is_title:
@@ -766,34 +1174,40 @@ class VietnameseLanguageModel:
         return token
 
     def correct_token(self, token: str) -> str:
-        """Giữ tương thích ngược đơn token."""
-        return self.correct_token_with_context(token, None, None)
+        """Tương thích ngược đơn token."""
+        return self.correct_token_with_context(token, None, None, None, None, None)
 
     def normalize_typography(self, text: str) -> str:
         """Chuẩn hóa khoảng trắng quanh dấu câu, số tiền, ngày tháng."""
         # Bỏ dấu cách trước dấu hai chấm, phẩy, chấm, chấm phẩy
         text = re.sub(r'\s+([:,\.\?!;])', r'\1', text)
-        # Thêm dấu cách sau dấu phẩy, hai chấm nếu thiếu (không áp dụng cho số 1.200.000 hoặc thời gian 12:30 hoặc url)
+        # Thêm dấu cách sau dấu phẩy, hai chấm nếu thiếu (không can thiệp số hoặc url)
         text = re.sub(r'([,:])([^\s0-9/])', r'\1 \2', text)
-        # Xóa các ký tự nhiễu OCR lẻ loi (như đơn độc dấu ngã ~, dấu nháy đơn lơ lửng)
+        # Xóa các ký tự nhiễu OCR lẻ loi
         text = re.sub(r'(?<=\s)[~\^`\'"](?=\s)', '', text)
         # Chuẩn hóa khoảng trắng thừa
         text = re.sub(r'[ \t]+', ' ', text)
         return text.strip()
 
     def process(self, text: str) -> str:
-        """Áp dụng toàn diện các tầng Mô hình Ngôn ngữ Tiếng Việt."""
+        """Áp dụng toàn diện các tầng Mô hình Ngôn ngữ Tiếng Việt v3.6.0."""
         if not text:
             return ""
 
         text = unicodedata.normalize('NFC', text)
 
-        # 1. Sửa lỗi chính tả từng từ đơn lẻ dựa trên Lexicon & Bi-gram Ngữ Cảnh
+        # 1. Lá chắn bảo vệ thực thể nhạy cảm (Sensitive Entity Shield)
+        shield = SensitiveEntityShield()
+        text = shield.shield(text)
+
+        # 2. Phân loại miền ngữ cảnh tài liệu (Dynamic Domain Context Detector)
+        domain_scores = DomainContextDetector.detect_domains(text)
+
+        # 3. Sửa lỗi chính tả từng từ kết hợp Ngữ cảnh 5-Gram & Ma trận Nhầm lẫn Thị giác (Markov Forward Propagation)
         words = text.split()
         corrected_words = []
         n_words = len(words)
         for i, w in enumerate(words):
-            # Tách dấu câu bám đầu/đuôi (nếu có)
             prefix = ""
             suffix = ""
             while w and w[0] in "([{\"'":
@@ -803,19 +1217,42 @@ class VietnameseLanguageModel:
                 suffix = w[-1] + suffix
                 w = w[:-1]
 
-            prev_w = words[i - 1].strip("([{\"'.,;:!?)'\"}]") if i > 0 else None
+            prev2_w = corrected_words[-2].strip("([{\"'.,;:!?)'\"}]") if len(corrected_words) >= 2 else None
+            prev_w = corrected_words[-1].strip("([{\"'.,;:!?)'\"}]") if len(corrected_words) >= 1 else None
             next_w = words[i + 1].strip("([{\"'.,;:!?)'\"}]") if i < n_words - 1 else None
+            next2_w = words[i + 2].strip("([{\"'.,;:!?)'\"}]") if i < n_words - 2 else None
 
-            cw = self.correct_token_with_context(w, prev_w, next_w)
+            cw = self.correct_token_with_context(
+                w,
+                prev2_w=prev2_w,
+                prev_w=prev_w,
+                next_w=next_w,
+                next2_w=next2_w,
+                domain_scores=domain_scores
+            )
             corrected_words.append(f"{prefix}{cw}{suffix}")
 
         text = " ".join(corrected_words)
 
-        # 2. Quy tắc ngữ cảnh cụm từ hóa đơn & hành chính (Domain Phrase Grammar)
-        for pattern, repl in VietnameseDiacriticsCorrector.WORD_REPLACEMENTS:
-            text = re.sub(pattern, repl, text, flags=re.IGNORECASE)
+        # 4. Quy tắc ngữ cảnh cụm từ hóa đơn, hành chính & pháp lý (Domain Phrase Grammar với Case-Preservation)
+        def _preserve_case_replace(pattern: str, repl: str, s: str) -> str:
+            def _repl_func(match):
+                orig = match.group(0)
+                target = repl
+                if target.endswith(':') and not orig.rstrip().endswith(':'):
+                    target = target[:-1].strip()
+                elif target.endswith(': ') and not orig.rstrip().endswith(':'):
+                    target = target[:-2].strip()
+                if orig.isupper():
+                    return target.upper()
+                return target
 
-        # 3. Đối soát địa danh 63 tỉnh thành
+            return re.sub(pattern, _repl_func, s, flags=re.IGNORECASE)
+
+        for pattern, repl in VietnameseDiacriticsCorrector.WORD_REPLACEMENTS:
+            text = _preserve_case_replace(pattern, repl, text)
+
+        # 5. Đối soát địa danh 63 tỉnh thành
         parts = [p.strip() for p in text.split(',')]
         if parts:
             last_part = parts[-1].strip()
@@ -831,7 +1268,10 @@ class VietnameseLanguageModel:
                 parts[-1] = best_match
                 text = ', '.join(parts)
 
-        # 4. Chuẩn hóa dấu câu & Typography (Punctuation Normalization)
+        # 6. Khôi phục toàn vẹn các thực thể nhạy cảm (Unshield)
+        text = shield.unshield(text)
+
+        # 7. Chuẩn hóa dấu câu & Typography
         text = self.normalize_typography(text)
 
         return unicodedata.normalize('NFC', text)

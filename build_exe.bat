@@ -21,7 +21,7 @@ if errorlevel 1 (
     echo Neu ban muon CHAY UNG DUNG tren may nay:
     echo   1. Hay tai goi PORTABLE da dong goi san tai:
     echo      https://github.com/DienKiku/super-ocr-pdf/releases
-    echo      (File: SuperOCRPDFStudio_v3.5.1_Portable_Win64.zip)
+    echo      (File: SuperOCRPDFStudio_v3.6.0_Portable_Win64.zip)
     echo   2. Giai nen va chay truc tiep SuperOCRPDFStudio.exe
     echo      khong can cai dat Python hay bat ky thu vien nao.
     echo ================================================================
@@ -71,9 +71,9 @@ echo File chay nam tai: dist\SuperOCRPDFStudio\SuperOCRPDFStudio.exe
 echo.
 echo Dang tu dong don dep cac goi ZIP phien ban cu va nen goi Portable moi...
 powershell -Command "Get-ChildItem -Path 'dist' -Filter '*.zip' | Remove-Item -Force" 2>nul
-tar -a -c -f dist\SuperOCRPDFStudio_v3.5.1_Portable_Win64.zip -C dist SuperOCRPDFStudio 2>nul || powershell -Command "Compress-Archive -Path 'dist\SuperOCRPDFStudio\*' -DestinationPath 'dist\SuperOCRPDFStudio_v3.5.1_Portable_Win64.zip' -Force" 2>nul
-if exist "dist\SuperOCRPDFStudio_v3.5.1_Portable_Win64.zip" (
-    echo Da tao goi nen thanh cong: dist\SuperOCRPDFStudio_v3.5.1_Portable_Win64.zip
+tar -a -c -f dist\SuperOCRPDFStudio_v3.6.0_Portable_Win64.zip -C dist SuperOCRPDFStudio 2>nul || powershell -Command "Compress-Archive -Path 'dist\SuperOCRPDFStudio\*' -DestinationPath 'dist\SuperOCRPDFStudio_v3.6.0_Portable_Win64.zip' -Force" 2>nul
+if exist "dist\SuperOCRPDFStudio_v3.6.0_Portable_Win64.zip" (
+    echo Da tao goi nen thanh cong: dist\SuperOCRPDFStudio_v3.6.0_Portable_Win64.zip
     echo Ban chi can copy file ZIP nay sang bat ky may Windows nao, giai nen la chay duoc ngay!
 )
 echo ================================================================

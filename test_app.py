@@ -520,6 +520,78 @@ class TestSuperOCRPDF(unittest.TestCase):
         self.assertEqual(lm.process("Số tiền viết bằng chữ: Bà triệu đồng"), "Số tiền viết bằng chữ: Ba triệu đồng")
         self.assertIn("Hồ Thị Diễm Trâm", lm.process("Khách hàng: Thế Chị Diễn Trăn"))
 
+    def test_17_context_weighted_semantic_postprocessing(self):
+        """Test v3.6.0 Context-Weighted Semantic Post-processing Engine."""
+        from core.ocr_engine import (
+            SensitiveEntityShield,
+            DomainContextDetector,
+            ContextWeightedSemanticEngine,
+            VietnameseBiGramModel,
+            VietnameseLanguageModel,
+        )
+
+        # 1. Test SensitiveEntityShield (Bảo vệ 100% thực thể nhạy cảm)
+        shield = SensitiveEntityShield()
+        sample_doc = (
+            "CÔNG TY TNHH ABC MST: 0311362549 Số TK: 1390468158 tại BIDV "
+            "Đơn giá 1.200.000 Thành tiền 3.268.000 Mã: MSNK4-0061 "
+            "ĐT: 028-38999571-38994165 Web: https://maisongnguyen.com/"
+        )
+        shielded = shield.shield(sample_doc)
+        self.assertNotIn("0311362549", shielded)
+        self.assertNotIn("1.200.000", shielded)
+        self.assertNotIn("MSNK4-0061", shielded)
+        self.assertIn("__SHIELD_ENT_", shielded)
+
+        unshielded = shield.unshield(shielded)
+        self.assertEqual(unshielded, sample_doc, "Thực thể nhạy cảm sau unshield phải trùng khớp 100% nguyên bản")
+
+        # 2. Test DomainContextDetector (Nhận diện ngữ cảnh động)
+        invoice_text = "Hóa đơn giá trị gia tăng tiền hàng thuế suất thanh toán xuất kho"
+        domains = DomainContextDetector.detect_domains(invoice_text)
+        self.assertIn("INVOICE_FINANCE", domains)
+        self.assertGreater(domains["INVOICE_FINANCE"], 5.0)
+
+        boost = DomainContextDetector.get_domain_boost(domains, "đồng")
+        self.assertGreater(boost, 1.5, "Từ vựng 'đồng' trong ngữ cảnh hóa đơn phải nhận domain boost")
+
+        # 3. Test ContextWeightedSemanticEngine (Ma trận nhầm lẫn thị giác)
+        cands_cl = ContextWeightedSemanticEngine.generate_candidate_stems("clao")
+        self.assertTrue("dao" in cands_cl or "đao" in cands_cl, "Phải chuyển đổi 'cl' thành 'd'/'đ'")
+
+        cands_0 = ContextWeightedSemanticEngine.generate_candidate_stems("c0ng")
+        self.assertIn("cong", cands_0, "Phải chuyển đổi '0' thành 'o'")
+
+        # 4. Test Tri-Gram & 5-Gram Context Scoring
+        bigram_model = VietnameseBiGramModel.get_instance()
+        trigram_score = bigram_model.score_trigram("cộng", "hòa", "xã")
+        self.assertGreater(trigram_score, 0, "Tri-gram 'cộng hòa xã' phải có điểm xác suất")
+
+        ctx_score = bigram_model.score_context(
+            prev2_w="cộng", prev_w="hòa", candidate="xã", next_w="hội", next2_w="chủ"
+        )
+        self.assertGreaterEqual(ctx_score, 50.0, "Cửa sổ 5-gram cho chuỗi chuẩn phải đạt điểm rất cao")
+
+        # 5. Test VietnameseLanguageModel End-to-End v3.6.0
+        lm = VietnameseLanguageModel.get_instance()
+
+        # Phục hồi lỗi OCR nhầm lẫn ký tự và dấu câu trong miền Hành chính & Pháp lý
+        res_admin = lm.process("Ủy ban nhan dan Thành Phố Hồ Chi Minh")
+        self.assertIn("Ủy ban nhân dân", res_admin)
+        self.assertIn("Hồ Chí Minh", res_admin)
+
+        # Phục hồi lỗi OCR trong miền Hóa đơn & Bán hàng có gắn thực thể nhạy cảm
+        invoice_ocr = "Phiếu xua1 kh0 kiêm giao hàng Đơn gia 1.200.000 MST: 0311362549"
+        res_invoice = lm.process(invoice_ocr)
+        self.assertIn("xuất kho", res_invoice.lower())
+        self.assertIn("1.200.000", res_invoice)
+        self.assertIn("0311362549", res_invoice)
+
+        # Phục hồi lỗi OCR trong miền CCCD & Nhân thân
+        res_id = lm.process("Can cước cong dan Họ và tên Ngày sinh")
+        self.assertIn("Căn cước công dân", res_id)
+        self.assertIn("Họ và tên", res_id)
+
 
 if __name__ == "__main__":
     unittest.main(warnings='ignore')

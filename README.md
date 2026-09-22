@@ -2,15 +2,15 @@
 
 ![Super OCR & High-Res PDF Studio](assets/github_cover.png)
 
-# 🚀 Super OCR & High-Res PDF Studio (v3.5.1)
+# 🚀 Super OCR & High-Res PDF Studio (v3.6.0)
 
-[![GitHub Release](https://img.shields.io/badge/Release-v3.5.1-00d2ff?style=for-the-badge&logo=github)](https://github.com/DienKiku/super-ocr-pdf/releases)
+[![GitHub Release](https://img.shields.io/badge/Release-v3.6.0-00d2ff?style=for-the-badge&logo=github)](https://github.com/DienKiku/super-ocr-pdf/releases)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(64--bit)-0078d7?style=for-the-badge&logo=windows)](https://github.com/DienKiku/super-ocr-pdf)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab?style=for-the-badge&logo=python)](https://www.python.org/)
-[![AI Engine](https://img.shields.io/badge/AI%20OCR-Dual--Engine%20Voting%20%7C%20VietOCR%20%2B%20PaddleOCR-00f2fe?style=for-the-badge)](https://github.com/DienKiku/super-ocr-pdf)
+[![AI Engine](https://img.shields.io/badge/AI%20OCR-Context--Weighted%20Semantic%20Engine%20%7C%20Dual--Engine%20Voting-00f2fe?style=for-the-badge)](https://github.com/DienKiku/super-ocr-pdf)
 [![Formats](https://img.shields.io/badge/Formats-JPEG%20XL%20%7C%20PNG%20%7C%20JPG%20%7C%20PDF-brightgreen?style=for-the-badge)](https://github.com/DienKiku/super-ocr-pdf)
 
-Ứng dụng Desktop chuyên nghiệp dành cho Windows: **Phục chế làm nét chữ siêu phân giải (Super-Resolution), nhận diện OCR Tiếng Việt & Chữ viết tay thông minh 100% Offline với cơ chế Nhận diện Kép (Dual-Engine Voting AI), hỗ trợ ảnh JPEG XL (JXL) dung lượng lớn và xuất tệp PDF chất lượng cao (Searchable PDF & High-Res Image PDF)**.
+Ứng dụng Desktop chuyên nghiệp dành cho Windows: **Phục chế làm nét chữ siêu phân giải (Super-Resolution), nhận diện OCR Tiếng Việt 100% Offline với cơ chế Nhận diện Kép (Dual-Engine AI Voting) kết hợp Động Cơ Ngữ Nghĩa Hậu Xử Lý Gắn Trọng Số Ngữ Cảnh (Context-Weighted Semantic Engine v3.6.0), bảo vệ thực thể nhạy cảm tuyệt đối, hỗ trợ ảnh JPEG XL (JXL) và xuất tệp Searchable PDF chất lượng cao**.
 
 Phát triển bởi: **Fami (fami_7006)**  
 Mã nguồn: [https://github.com/DienKiku/super-ocr-pdf](https://github.com/DienKiku/super-ocr-pdf)
@@ -37,19 +37,26 @@ Mã nguồn: [https://github.com/DienKiku/super-ocr-pdf](https://github.com/Dien
 - Kéo thanh trượt trực tiếp trên trang tài liệu để trực quan hóa sự khác biệt giữa **Ảnh gốc (Trước)** và **Ảnh đã phục chế làm nét (Sau)**.
 - Hỗ trợ phóng to/thu nhỏ (Zoom in/out), xem theo tỷ lệ chuẩn 100% (1:1), vừa khít khung nhìn (Fit to window) và di chuyển tự do (Pan).
 
-### 3. 📝 Hệ thống nhận diện AI Dual-Engine 100% Offline đột phá
+### 3. 🧠 Động Cơ Ngữ Nghĩa Hậu Xử Lý Đột Phá (Context-Weighted Semantic Engine v3.6.0)
+- 🛡️ **Lá chắn Bảo vệ Thực thể Nhạy cảm (Sensitive Entity Shield):** Cách ly và bảo toàn 100% nguyên vẹn số tiền phân cách hàng nghìn (`1.200.000`), Mã số thuế (`0311362549`), Số tài khoản ngân hàng (`1390468158`), Mã SKU linh kiện (`MSNK4-0061`), Số điện thoại, Email và URL trước khi chạy xử lý ngôn ngữ.
+- 🎯 **Phân loại Miền Ngữ cảnh Động (Dynamic Domain Context Detector):** Tự động nhận diện 5 miền chuyên sâu (*Hóa đơn / Tài chính, Hành chính / Pháp lý, Địa danh / Địa chỉ, Nhân thân / CCCD, Logistics / Giao vận*) để áp hệ số nhân trọng số ngữ cảnh chính xác.
+- 👁️ **Ma trận Xử lý Nhầm lẫn Thị giác (Visual Homoglyphs):** Tự động phát hiện và sửa các lỗi sai hình dạng ký tự OCR điển hình (`cl` $\rightarrow$ `d`/`đ`, `rn` $\rightarrow$ `m`, `0` $\rightarrow$ `o`, `1` $\rightarrow$ `l`/`i`/`t`, `5` $\rightarrow$ `s`, `8` $\rightarrow$ `b`).
+- 🔗 **Mô hình Ngôn ngữ 5-Gram Markov Phục hồi Thanh dấu:** Kết hợp cửa sổ ngữ cảnh 5 từ (`prev2`, `prev`, `cand`, `next`, `next2`) cùng thuật toán truyền xuôi Markov, giải quyết triệt để các từ đồng âm/mất dấu (`toan` $\rightarrow$ `toàn`/`toán`, `dan` $\rightarrow$ `dân`).
+- 🚦 **Cổng Kiểm duyệt An toàn (High-Delta Safety Gating):** Thiết lập ngưỡng chênh lệch an toàn cao ($\ge 35$ điểm), tuyệt đối ngăn chặn việc sửa nhầm các từ đúng trong tiếng Việt.
+- 📜 **Hơn 240 Quy tắc Ngữ pháp Đa Miền (Domain Phrase Grammar):** Chuẩn hóa toàn bộ thuật ngữ hóa đơn, biên bản xuất nhập kho, mẫu biểu hành chính nhà nước, bảo toàn định dạng in hoa và dấu câu.
+
+### 4. 📝 Hệ thống nhận diện AI Dual-Engine 100% Offline
 - 🇻🇳 **Cơ chế Nhận diện Kép (Dual-Engine AI Voting & Fusion):**
   - **Tầng 1 (Định vị & Cắt ảnh thích ứng):** Mô hình **PaddleOCR DBNet (PP-OCRv4)** định vị khung chữ $1:1$, kết hợp giải thuật **Dynamic Adaptive Padding** (16% chiều cao dòng) bảo vệ $100\%$ dấu thanh và đuôi chữ.
   - **Tầng 2 (Phân tích bố cục đa cột XY-Cut):** Tự động phát hiện rãnh trắng (gutter) và tách cột độc lập, bảo toàn thứ tự đọc tự nhiên của tài liệu 2–3 cột.
   - **Tầng 3 (Nhận diện Kép Song Song):** Kết hợp tốc độ và độ chuẩn xác số hiệu của **PaddleOCR SVTR-LCNet v4** cùng khả năng hiểu tiếng Việt ngữ cảnh của **VietOCR ResNet/VGG Transformer**. Bộ trọng tài tự động phân xử và cross-validation kết quả.
-  - **Tầng 4 (Mô hình Ngôn ngữ Bi-Gram LM):** Tra cứu từ điển 74.000 từ vựng và mạng lưới xác suất 48.000 cặp từ bi-gram, giải quyết triệt để các từ đa nghĩa bị mất dấu đồng thời bảo toàn 100% mã số thuế, email, website và ký hiệu kỹ thuật.
 
-### 4. 🚀 Tối ưu hóa hiệu năng & Hỗ trợ chuẩn JPEG XL (JXL)
+### 5. 🚀 Tối ưu hóa hiệu năng & Hỗ trợ chuẩn JPEG XL (JXL)
 - **Hỗ trợ định dạng ảnh tiên tiến JPEG XL (`.jxl`):** Xử lý trực tiếp các kho ảnh nén chất lượng cao thế hệ mới.
 - **Cơ chế nạp lười thông minh (Lazy Loading & Smart Pagination):** Đọc trơn tru thư mục chứa **5.000+ bức ảnh** chỉ với ~75MB RAM thay vì hàng chục GB, ngăn ngừa hoàn toàn hiện tượng tràn bộ nhớ hay treo ứng dụng.
 - **Giao diện đáp ứng (Adaptive Responsive UI) & Khay hệ thống (System Tray):** Tự động căn chỉnh vừa vặn với mọi độ phân giải màn hình từ Laptop 1366x768 đến màn hình 4K; biểu tượng khay hệ thống giúp ứng dụng luôn sẵn sàng phục vụ.
 
-### 5. 📄 Xuất PDF Siêu Phân Giải & Tìm kiếm được (Searchable PDF)
+### 6. 📄 Xuất PDF Siêu Phân Giải & Tìm kiếm được (Searchable PDF)
 - **PDF Tìm kiếm được (Searchable PDF):** Tự động nhúng lớp chữ OCR ẩn chính xác từng tọa độ từ. Khi mở trên bất kỳ trình đọc PDF nào (Adobe Acrobat, Foxit Reader, Chrome, Edge), bạn có thể **tìm kiếm (Ctrl+F), bôi đen và sao chép (Copy) văn bản**.
 - **PDF Ảnh siêu phân giải (High-Res Image PDF):** Giữ trọn độ nét cao nhất cho nhu cầu in ấn và lưu trữ hồ sơ.
 - Đa dạng tùy chọn khổ trang: Khớp tỷ lệ ảnh gốc, Khổ A4 Dọc, Khổ A4 Ngang.
@@ -61,7 +68,7 @@ Mã nguồn: [https://github.com/DienKiku/super-ocr-pdf](https://github.com/Dien
 
 ### 1. Dành cho người dùng thông thường (Khuyên dùng - Không cần cài Python)
 - Tải trực tiếp gói ứng dụng độc lập tại mục **[Releases](https://github.com/DienKiku/super-ocr-pdf/releases)**:
-  - Tải tệp: **`SuperOCRPDFStudio_v3.5.1_Portable_Win64.zip`**
+  - Tải tệp: **`SuperOCRPDFStudio_v3.6.0_Portable_Win64.zip`**
   - Giải nén tệp `.zip` vào bất kỳ thư mục nào trên máy tính.
   - Nhấp đúp chuột vào **`SuperOCRPDFStudio.exe`** để mở ứng dụng ngay lập tức (100% đầy đủ thư viện & mô hình AI, không cần cài đặt gì thêm).
 
@@ -89,7 +96,7 @@ python main.py
 - Sau khi đóng gói hoàn tất, ứng dụng sẽ nằm tại:
   ```text
   dist\SuperOCRPDFStudio\SuperOCRPDFStudio.exe
-  dist\SuperOCRPDFStudio_v3.5.1_Portable_Win64.zip
+  dist\SuperOCRPDFStudio_v3.6.0_Portable_Win64.zip
   ```
 
 ---
